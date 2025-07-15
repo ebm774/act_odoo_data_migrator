@@ -35,7 +35,7 @@
                         class="btn-danger" invisible="state != 'running'"/>
                     <button name="action_retry" type="object" string="Retry"
                          invisible="state not in ['error', 'cancelled']"/>
-                    <field name="state" widget="statusbar"   options="{'statusbar_visible': ['draft', 'running', 'done']}"/>
+                    <field name="state" widget="statusbar" options="{'statusbar_visible': ['draft', 'running', 'done']}"/>
                 </header>
                 <sheet>
                     <div class="oe_title">
@@ -46,10 +46,10 @@
                     <group>
                         <group string="Configuration">
                             <field name="mapping_id" options="{'no_create': True}"
-                                readonly = "state != 'draft'"/>
+                                readonly="state != 'draft'"/>
                             <field name="create_date" readonly="1"/>
                         </group>
-                        <group string="Progress" invisible="state in 'draft'">
+                        <group string="Progress" invisible="state == 'draft'">
                             <field name="progress" widget="progressbar"/>
                             <field name="total_records" readonly="1"/>
                             <field name="imported_records" readonly="1"/>
