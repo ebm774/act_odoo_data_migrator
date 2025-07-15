@@ -32,6 +32,11 @@
     # any module necessary for this one to work correctly
     'depends': ['base', 'web'],
 
+    # ADD THIS SECTION - External Dependencies
+    'external_dependencies': {
+        'python': ['pyodbc'],
+    },
+
     # always loaded
     'data': [
         # Security

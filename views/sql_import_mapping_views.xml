@@ -26,6 +26,7 @@
                     <button name="fetch_source_columns" type="object" string="Fetch Source Columns" class="btn-secondary"/>
                     <button name="fetch_target_fields" type="object" string="Fetch Target Fields" class="btn-secondary"/>
                     <button name="generate_default_mapping" type="object" string="Auto-Generate Mapping" class="btn-primary"/>
+                    <button name="action_test_mapping" type="object" string="Test Mapping" class="btn-success"/>
                 </header>
                 <sheet>
                     <div class="oe_title">
@@ -54,18 +55,55 @@
                             <div class="alert alert-info" role="alert">
                                 <h4>Field Mapping Format:</h4>
                                 <pre>[
-                                      {
-                                        "source_field": "CustomerName",
-                                        "target_field": "name",
-                                        "transform": "direct"
-                                      },
-                                      {
-                                        "source_field": "Email",
-                                        "target_field": "email",
-                                        "transform": "str"
-                                      }
-                                    ]</pre>
-                                <p>Available transforms: direct, bool, int, float, str</p>
+  {
+    "source_field": "CustomerName",
+    "target_field": "name",
+    "transform": "direct"
+  },
+  {
+    "source_field": "Email",
+    "target_field": "email",
+    "transform": "str"
+  },
+  {
+    "source_field": "IsActive",
+    "target_field": "active",
+    "transform": "bool"
+  }
+]</pre>
+                                <p><strong>Available transforms:</strong></p>
+                                <ul>
+                                    <li><code>direct</code> - No transformation</li>
+                                    <li><code>str</code> - Convert to string</li>
+                                    <li><code>bool</code> - Convert to boolean</li>
+                                    <li><code>int</code> - Convert to integer</li>
+                                    <li><code>float</code> - Convert to float</li>
+                                    <li><code>date</code> - Convert to date</li>
+                                    <li><code>datetime</code> - Convert to datetime</li>
+                                </ul>
+                            </div>
+                        </page>
+                        <page string="Mapping Help">
+                            <div class="alert alert-primary" role="alert">
+                                <h4>How to Create Mappings:</h4>
+                                <ol>
+                                    <li>Configure your source connection and table</li>
+                                    <li>Set the target Odoo model</li>
+                                    <li>Click "Fetch Source Columns" to see available fields</li>
+                                    <li>Click "Fetch Target Fields" to see Odoo model fields</li>
+                                    <li>Click "Auto-Generate Mapping" for automatic field matching</li>
+                                    <li>Manually adjust mappings as needed</li>
+                                    <li>Click "Test Mapping" to validate configuration</li>
+                                </ol>
+                            </div>
+                            <div class="alert alert-warning" role="alert">
+                                <h4>Important Notes:</h4>
+                                <ul>
+                                    <li>Required fields in the target model must be mapped</li>
+                                    <li>Date fields from SQL Server may need datetime transform</li>
+                                    <li>Boolean fields should use bool transform</li>
+                                    <li>Test your mapping before running large imports</li>
+                                </ul>
                             </div>
                         </page>
                     </notebook>

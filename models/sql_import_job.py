@@ -3,6 +3,7 @@ from odoo.exceptions import UserError
 import json
 import logging
 from datetime import datetime
+from dateutil import parser
 
 _logger = logging.getLogger(__name__)
 
@@ -107,6 +108,10 @@ class SqlImportJob(models.Model):
         """Execute the actual import"""
         self.ensure_one()
         mapping = self.mapping_id
+
+        # Validate mapping
+        mapping.validate_mapping()
+
         field_mappings = json.loads(mapping.field_mappings or '[]')
 
         if not field_mappings:
@@ -140,30 +145,42 @@ class SqlImportJob(models.Model):
             cursor.execute(select_query)
 
             # Process in batches
-            batch = []
+            processed_count = 0
             while True:
                 rows = cursor.fetchmany(mapping.batch_size)
                 if not rows:
                     break
 
+                batch_data = []
                 for row in rows:
                     try:
                         record_data = self._prepare_record_data(row, field_mappings)
-
-                        if mapping.target_mode == 'create':
-                            self.env[mapping.target_model].create(record_data)
-                        elif mapping.target_mode == 'update':
-                            # You'll need to implement logic to find existing records
-                            pass
-                        elif mapping.target_mode == 'create_update':
-                            # You'll need to implement create or update logic
-                            pass
-
-                        self.imported_records += 1
+                        batch_data.append(record_data)
+                        processed_count += 1
 
                     except Exception as e:
                         self.failed_records += 1
-                        self._log(f'Failed to import record: {str(e)}', 'warning')
+                        self._log(f'Failed to prepare record {processed_count}: {str(e)}', 'warning')
+
+                        if not mapping.skip_errors:
+                            raise
+
+                # Import batch
+                if batch_data:
+                    try:
+                        if mapping.target_mode == 'create':
+                            self.env[mapping.target_model].create(batch_data)
+                            self.imported_records += len(batch_data)
+                        elif mapping.target_mode == 'update':
+                            # Implementation depends on your update logic
+                            self._update_records(batch_data, mapping)
+                        elif mapping.target_mode == 'create_update':
+                            # Implementation depends on your create_update logic
+                            self._create_or_update_records(batch_data, mapping)
+
+                    except Exception as e:
+                        self.failed_records += len(batch_data)
+                        self._log(f'Failed to import batch: {str(e)}', 'warning')
 
                         if not mapping.skip_errors:
                             raise
@@ -182,19 +199,53 @@ class SqlImportJob(models.Model):
             transform = mapping.get('transform', 'direct')
 
             # Apply transformations
-            if transform == 'direct':
-                data[target_field] = source_value
-            elif transform == 'bool':
-                data[target_field] = bool(source_value)
-            elif transform == 'int':
-                data[target_field] = int(source_value) if source_value is not None else 0
-            elif transform == 'float':
-                data[target_field] = float(source_value) if source_value is not None else 0.0
-            elif transform == 'str':
-                data[target_field] = str(source_value) if source_value is not None else ''
-            # Add more transformations as needed
+            try:
+                if transform == 'direct':
+                    data[target_field] = source_value
+                elif transform == 'bool':
+                    data[target_field] = bool(source_value) if source_value is not None else False
+                elif transform == 'int':
+                    data[target_field] = int(source_value) if source_value is not None else 0
+                elif transform == 'float':
+                    data[target_field] = float(source_value) if source_value is not None else 0.0
+                elif transform == 'str':
+                    data[target_field] = str(source_value) if source_value is not None else ''
+                elif transform == 'date':
+                    if source_value:
+                        if isinstance(source_value, str):
+                            data[target_field] = parser.parse(source_value).date()
+                        else:
+                            data[target_field] = source_value.date() if hasattr(source_value, 'date') else source_value
+                    else:
+                        data[target_field] = False
+                elif transform == 'datetime':
+                    if source_value:
+                        if isinstance(source_value, str):
+                            data[target_field] = parser.parse(source_value)
+                        else:
+                            data[target_field] = source_value
+                    else:
+                        data[target_field] = False
+                else:
+                    # Unknown transform, use direct
+                    data[target_field] = source_value
+
+            except Exception as e:
+                raise UserError(f'Transform error for field {target_field}: {str(e)}')
 
         return data
+
+    def _update_records(self, batch_data, mapping):
+        """Update existing records (to be implemented based on your needs)"""
+        # This is a placeholder - implement based on your specific update logic
+        # You'll need to define how to identify existing records
+        pass
+
+    def _create_or_update_records(self, batch_data, mapping):
+        """Create or update records (to be implemented based on your needs)"""
+        # This is a placeholder - implement based on your specific create_update logic
+        # You'll need to define how to identify existing records
+        pass
 
     def action_cancel(self):
         """Cancel the import job"""
@@ -228,3 +279,15 @@ class SqlImportJob(models.Model):
             'view_mode': 'form',
             'target': 'current',
         }
+
+    def action_view_imported_records(self):
+        """View imported records (if applicable)"""
+        self.ensure_one()
+        if self.state == 'done' and self.imported_records > 0:
+            return {
+                'type': 'ir.actions.act_window',
+                'res_model': self.mapping_id.target_model,
+                'view_mode': 'tree,form',
+                'name': f'Imported Records - {self.name}',
+                'domain': [],  # You might want to add a domain to filter imported records
+            }

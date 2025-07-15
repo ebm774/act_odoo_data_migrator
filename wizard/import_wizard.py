@@ -1,5 +1,6 @@
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
+import json
 
 
 class SqlImportWizard(models.TransientModel):
@@ -29,6 +30,10 @@ class SqlImportWizard(models.TransientModel):
             raise UserError(_('Please select a mapping'))
 
         mapping = self.mapping_id
+
+        # Validate mapping first
+        mapping.validate_mapping()
+
         field_mappings = json.loads(mapping.field_mappings or '[]')
 
         if not field_mappings:
@@ -76,6 +81,9 @@ class SqlImportWizard(models.TransientModel):
     def action_import(self):
         """Create and start import job"""
         self.ensure_one()
+
+        # Validate mapping before creating job
+        self.mapping_id.validate_mapping()
 
         # Create import job
         job = self.env['sql.import.job'].create({
