@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- SQL Import Manager Group -->
+        <record id="group_sql_import_manager" model="res.groups">
+            <field name="name">SQL Import Manager</field>
+            <field name="category_id" ref="base.module_category_administration"/>
+            <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
+        </record>
+
+        <!-- SQL Import User Group -->
+        <record id="group_sql_import_user" model="res.groups">
+            <field name="name">SQL Import User</field>
+            <field name="category_id" ref="base.module_category_administration"/>
+            <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
+        </record>
+    </data>
+</odoo>

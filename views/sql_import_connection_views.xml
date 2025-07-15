@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Tree View -->
+    <record id="view_sql_import_connection_tree" model="ir.ui.view">
+        <field name="name">sql.import.connection.tree</field>
+        <field name="model">sql.import.connection</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name"/>
+                <field name="server"/>
+                <field name="database"/>
+                <field name="state" widget="badge"
+                       decoration-success="state == 'connected'"
+                       decoration-danger="state == 'error'"/>
+                <field name="last_connection_date"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Form View -->
+    <record id="view_sql_import_connection_form" model="ir.ui.view">
+        <field name="name">sql.import.connection.form</field>
+        <field name="model">sql.import.connection</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="test_connection" type="object" string="Test Connection" class="btn-primary"/>
+                    <button name="fetch_tables" type="object" string="Fetch Tables" invisible="state != 'connected'"/>
+                    <field name="state" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Connection Name"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="Connection Details">
+                            <field name="server"/>
+                            <field name="port"/>
+                            <field name="database"/>
+                            <field name="driver"/>
+                        </group>
+                        <group string="Authentication">
+                            <field name="username"/>
+                            <field name="password" password="True"/>
+                            <field name="active" widget="boolean_toggle"/>
+                        </group>
+                    </group>
+                    <group string="Status" invisible="state == 'draft'">
+                        <field name="last_connection_date" readonly="1"/>
+                        <field name="error_message" readonly="1" invisible="state != 'error'"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="action_sql_import_connection" model="ir.actions.act_window">
+        <field name="name">SQL Server Connections</field>
+        <field name="res_model">sql.import.connection</field>
+        <field name="view_mode">tree,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Create your first SQL Server connection
+            </p>
+            <p>
+                Configure connections to your SQL Server 2014 databases for data import.
+            </p>
+        </field>
+    </record>
+</odoo>

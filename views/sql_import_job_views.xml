@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Tree View -->
+    <record id="view_sql_import_job_tree" model="ir.ui.view">
+        <field name="name">sql.import.job.tree</field>
+        <field name="model">sql.import.job</field>
+        <field name="arch" type="xml">
+            <list default_order="create_date desc">
+                <field name="name"/>
+                <field name="mapping_id"/>
+                <field name="state" widget="badge"
+                    decoration-info="state=='draft'"
+                    decoration-warning="state=='running'"
+                    decoration-success="state=='done'"
+                    decoration-danger="state=='error'"/>
+                <field name="total_records"/>
+                <field name="imported_records"/>
+                <field name="failed_records"/>
+                <field name="progress" widget="progressbar"/>
+                <field name="create_date"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Form View -->
+    <record id="view_sql_import_job_form" model="ir.ui.view">
+        <field name="name">sql.import.job.form</field>
+        <field name="model">sql.import.job</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="action_start" type="object" string="Start Import"
+                        class="btn-primary" invisible="state != 'draft'"/>
+                    <button name="action_cancel" type="object" string="Cancel"
+                        class="btn-danger" invisible="state != 'running'"/>
+                    <button name="action_retry" type="object" string="Retry"
+                         invisible="state not in ['error', 'cancelled']"/>
+                    <field name="state" widget="statusbar"   options="{'statusbar_visible': ['draft', 'running', 'done']}"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="Configuration">
+                            <field name="mapping_id" options="{'no_create': True}"
+                                readonly = "state != 'draft'"/>
+                            <field name="create_date" readonly="1"/>
+                        </group>
+                        <group string="Progress" invisible="state in 'draft'">
+                            <field name="progress" widget="progressbar"/>
+                            <field name="total_records" readonly="1"/>
+                            <field name="imported_records" readonly="1"/>
+                            <field name="failed_records" readonly="1"/>
+                        </group>
+                    </group>
+                    <group string="Execution Details" invisible="state == 'draft'">
+                        <field name="start_date" readonly="1"/>
+                        <field name="end_date" readonly="1"/>
+                        <field name="duration" readonly="1" widget="float_time"/>
+                    </group>
+                    <notebook>
+                        <page string="Import Log" invisible="state == 'draft'">
+                            <field name="log_entries" widget="text" readonly="1"
+                                style="font-family: monospace; background-color: #f8f9fa;"/>
+                        </page>
+                        <page string="Error Details" invisible="error_message == False">
+                            <field name="error_message" readonly="1"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Kanban View -->
+    <record id="view_sql_import_job_kanban" model="ir.ui.view">
+        <field name="name">sql.import.job.kanban</field>
+        <field name="model">sql.import.job</field>
+        <field name="arch" type="xml">
+            <kanban default_group_by="state" quick_create="false">
+                <field name="name"/>
+                <field name="mapping_id"/>
+                <field name="state"/>
+                <field name="progress"/>
+                <field name="total_records"/>
+                <field name="imported_records"/>
+                <field name="failed_records"/>
+                <progressbar field="progress" colors='{"0": "danger", "100": "success"}'/>
+                <templates>
+                    <t t-name="kanban-box">
+                        <div class="oe_kanban_global_click">
+                            <div class="oe_kanban_details">
+                                <strong><field name="name"/></strong>
+                                <div class="text-muted">
+                                    <field name="mapping_id"/>
+                                </div>
+                                <div class="o_kanban_record_bottom">
+                                    <div class="oe_kanban_bottom_left">
+                                        <span>Records: <field name="imported_records"/>/<field name="total_records"/></span>
+                                    </div>
+                                    <div class="oe_kanban_bottom_right">
+                                        <field name="progress" widget="progressbar"/>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <!-- Search View -->
+    <record id="view_sql_import_job_search" model="ir.ui.view">
+        <field name="name">sql.import.job.search</field>
+        <field name="model">sql.import.job</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name"/>
+                <field name="mapping_id"/>
+                <filter name="running" string="Running" domain="[('state', '=', 'running')]"/>
+                <filter name="done" string="Completed" domain="[('state', '=', 'done')]"/>
+                <filter name="error" string="Failed" domain="[('state', '=', 'error')]"/>
+                <separator/>
+                <filter name="today" string="Today" domain="[('create_date', '>=', datetime.datetime.now().replace(hour=0, minute=0, second=0))]"/>
+                <filter name="last_week" string="Last 7 Days" domain="[('create_date', '>=', (datetime.datetime.now() - datetime.timedelta(days=7)).strftime('%Y-%m-%d'))]"/>
+                <group expand="0" string="Group By">
+                    <filter name="group_by_state" string="Status" context="{'group_by': 'state'}"/>
+                    <filter name="group_by_mapping" string="Mapping" context="{'group_by': 'mapping_id'}"/>
+                    <filter name="group_by_date" string="Date" context="{'group_by': 'create_date:day'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="action_sql_import_job" model="ir.actions.act_window">
+        <field name="name">Import Jobs</field>
+        <field name="res_model">sql.import.job</field>
+        <field name="view_mode">tree,kanban,form</field>
+        <field name="search_view_id" ref="view_sql_import_job_search"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No import jobs yet
+            </p>
+            <p>
+                Import jobs track the execution of your SQL Server data imports.
+            </p>
+        </field>
+    </record>
+</odoo>

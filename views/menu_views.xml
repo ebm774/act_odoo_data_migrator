@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Main Menu -->
+    <menuitem id="menu_sql_import_root"
+        name="SQL Import"
+        web_icon="data_migrator,static/description/icon.png"
+        sequence="50"/>
+
+    <!-- Configuration Menu -->
+    <menuitem id="menu_sql_import_config"
+        name="Configuration"
+        parent="menu_sql_import_root"
+        sequence="10"/>
+
+    <menuitem id="menu_sql_import_connection"
+        name="Connections"
+        parent="menu_sql_import_config"
+        action="action_sql_import_connection"
+        sequence="10"/>
+
+    <menuitem id="menu_sql_import_mapping"
+        name="Mappings"
+        parent="menu_sql_import_config"
+        action="action_sql_import_mapping"
+        sequence="20"/>
+
+    <!-- Operations Menu -->
+    <menuitem id="menu_sql_import_operations"
+        name="Operations"
+        parent="menu_sql_import_root"
+        sequence="20"/>
+
+    <menuitem id="menu_sql_import_job"
+        name="Import Jobs"
+        parent="menu_sql_import_operations"
+        action="action_sql_import_job"
+        sequence="10"/>
+
+    <!-- Quick Import Wizard -->
+    <menuitem id="menu_sql_import_wizard"
+        name="Quick Import"
+        parent="menu_sql_import_operations"
+        action="action_sql_import_wizard"
+        sequence="20"/>
+</odoo>

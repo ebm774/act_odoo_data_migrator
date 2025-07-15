@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Tree View -->
+    <record id="view_sql_import_mapping_tree" model="ir.ui.view">
+        <field name="name">sql.import.mapping.tree</field>
+        <field name="model">sql.import.mapping</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name"/>
+                <field name="connection_id"/>
+                <field name="source_table"/>
+                <field name="target_model"/>
+                <field name="target_mode"/>
+                <field name="active" widget="boolean_toggle"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Form View -->
+    <record id="view_sql_import_mapping_form" model="ir.ui.view">
+        <field name="name">sql.import.mapping.form</field>
+        <field name="model">sql.import.mapping</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="fetch_source_columns" type="object" string="Fetch Source Columns" class="btn-secondary"/>
+                    <button name="fetch_target_fields" type="object" string="Fetch Target Fields" class="btn-secondary"/>
+                    <button name="generate_default_mapping" type="object" string="Auto-Generate Mapping" class="btn-primary"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Mapping Name"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="Source Configuration">
+                            <field name="connection_id" options="{'no_create': True}"/>
+                            <field name="source_schema"/>
+                            <field name="source_table"/>
+                            <field name="source_filter" placeholder="e.g., IsActive = 1 AND CreatedDate > '2020-01-01'"/>
+                        </group>
+                        <group string="Target Configuration">
+                            <field name="target_model" placeholder="e.g., res.partner, product.product"/>
+                            <field name="target_mode"/>
+                            <field name="batch_size"/>
+                            <field name="skip_errors"/>
+                            <field name="active" widget="boolean_toggle"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Field Mappings">
+                            <field name="field_mappings" widget="ace" options="{'mode': 'json'}"/>
+                            <div class="alert alert-info" role="alert">
+                                <h4>Field Mapping Format:</h4>
+                                <pre>[
+                                      {
+                                        "source_field": "CustomerName",
+                                        "target_field": "name",
+                                        "transform": "direct"
+                                      },
+                                      {
+                                        "source_field": "Email",
+                                        "target_field": "email",
+                                        "transform": "str"
+                                      }
+                                    ]</pre>
+                                <p>Available transforms: direct, bool, int, float, str</p>
+                            </div>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="action_sql_import_mapping" model="ir.actions.act_window">
+        <field name="name">Import Mappings</field>
+        <field name="res_model">sql.import.mapping</field>
+        <field name="view_mode">tree,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Create your first import mapping
+            </p>
+            <p>
+                Define how SQL Server tables map to Odoo models and configure field transformations.
+            </p>
+        </field>
+    </record>
+</odoo>

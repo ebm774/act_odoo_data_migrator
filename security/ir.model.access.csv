@@ -1,0 +1,7 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_sql_import_connection_user,sql.import.connection.user,model_sql_import_connection,group_sql_import_user,1,0,0,0,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+access_sql_import_connection_manager,sql.import.connection.manager,model_sql_import_connection,group_sql_import_manager,1,1,1,1,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+access_sql_import_mapping_user,sql.import.mapping.user,model_sql_import_mapping,group_sql_import_user,1,0,0,0,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+access_sql_import_mapping_manager,sql.import.mapping.manager,model_sql_import_mapping,group_sql_import_manager,1,1,1,1,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+access_sql_import_job_user,sql.import.job.user,model_sql_import_job,group_sql_import_user,1,0,0,0,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+access_sql_import_job_manager,sql.import.job.manager,model_sql_import_job,group_sql_import_manager,1,1,1,1,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
