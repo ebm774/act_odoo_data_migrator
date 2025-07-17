@@ -19,9 +19,8 @@ class SqlImportConnection(models.Model, PasswordMixin):
     port = fields.Integer(string='Port', default=1433)
     database = fields.Char(string='Database', required=True)
     username = fields.Char(string='Username', required=True)
-    password_encrypted = fields.Binary(string='Encrypted Password', readonly=True)
+    password_encrypted = fields.Text(string='Encrypted Password', readonly=True)
     password = fields.Char(string='Password', required=True, store=False)
-
 
     # Connection options
     timeout = fields.Integer(string='Connection Timeout', default=30)
@@ -31,11 +30,11 @@ class SqlImportConnection(models.Model, PasswordMixin):
         ('cp1252', 'Windows-1252'),
     ], string='Character Set', default='utf8')
 
-
     active = fields.Boolean(default=True)
     state = fields.Selection([
         ('draft', 'Not Tested'),
         ('connected', 'Connected'),
+        ('error', 'Connection Error')  # Added 'error' state
     ], string='Status', default='draft')
 
     last_connection_date = fields.Datetime(string='Last Connection')
@@ -44,26 +43,38 @@ class SqlImportConnection(models.Model, PasswordMixin):
     @api.model
     def _check_dependencies(self):
         """Check if required Python packages are available"""
-        missing_packages = []
-
-        if missing_packages:
+        try:
+            import pymssql
+        except ImportError:
             raise UserError(_(
-                'Missing required Python packages: %s\n\n'
+                'Missing required Python package: pymssql\n\n'
                 'Please install with:\n'
-                'pip install pymssql\n'
-                'or\n'
-                'pip install pyodbc'
-            ) % ', '.join(missing_packages))
+                'pip install pymssql'
+            ))
+
+    def _get_password(self):
+        """Get decrypted password"""
+        if self.password_encrypted:
+            # Convert string back to bytes for decryption
+            encrypted_bytes = self.password_encrypted.encode('utf-8') if isinstance(self.password_encrypted,
+                                                                                    str) else self.password_encrypted
+            return self.decrypt_password(encrypted_bytes)
+        return None
 
     def _get_pymssql_connection(self):
         """Create connection using pymssql"""
-
         try:
+            # Get decrypted password
+            password = self._get_password()
+
+            if not password:
+                raise UserError(_('Password is required for connection'))
+
             return pymssql.connect(
                 server=self.server,
                 port=self.port,
                 user=self.username,
-                password=self.password,
+                password=password,  # Use decrypted password
                 database=self.database,
                 timeout=self.timeout,
                 charset=self.charset,
@@ -73,7 +84,6 @@ class SqlImportConnection(models.Model, PasswordMixin):
             _logger.error(f"pymssql connection failed: {e}")
             raise UserError(_('Failed to connect using pymssql: %s') % str(e))
 
-
     def test_connection(self):
         """Test SQL Server connection"""
         self.ensure_one()
@@ -81,6 +91,7 @@ class SqlImportConnection(models.Model, PasswordMixin):
         try:
             # Check dependencies first
             self._check_dependencies()
+
             # create connection
             conn = self._get_pymssql_connection()
 
@@ -97,17 +108,6 @@ class SqlImportConnection(models.Model, PasswordMixin):
                 'error_message': False
             })
 
-            # return {
-            #     'type': 'ir.actions.client',
-            #     'tag': 'display_notification',
-            #     'params': {
-            #         'title': _('Success'),
-            #         'message': _('Connection successful\n Connection string saved'),
-            #         'type': 'success',
-            #         'sticky': False,
-            #     }
-            # }
-
             return {
                 'type': 'ir.actions.act_window',
                 'res_model': 'sql.import.connection',
@@ -120,13 +120,12 @@ class SqlImportConnection(models.Model, PasswordMixin):
                 }
             }
 
-
         except Exception as e:
             self.write({
                 'state': 'error',
                 'error_message': str(e)
             })
-            raise UserError(_('Connection failed:  %s') % str(e))
+            raise UserError(_('Connection failed: %s') % str(e))
 
     def get_connection(self):
         """Return a SQL Server connection object"""
@@ -185,11 +184,15 @@ class SqlImportConnection(models.Model, PasswordMixin):
 
     @api.model_create_multi
     def create(self, vals_list):
+        """Handle password encryption on create"""
         for vals in vals_list:
             if 'password' in vals and vals['password']:
                 # Encrypt password using mixin
                 encrypted = self.encrypt_password(vals['password'])
-                vals['password_encrypted'] = encrypted
+                if encrypted:
+                    # Convert bytes to string for Text field storage
+                    vals['password_encrypted'] = encrypted.decode('utf-8') if isinstance(encrypted,
+                                                                                         bytes) else encrypted
                 del vals['password']  # Don't store plain text
         return super().create(vals_list)
 
@@ -198,7 +201,23 @@ class SqlImportConnection(models.Model, PasswordMixin):
         if 'password' in vals and vals['password']:
             # Encrypt new password using mixin
             encrypted = self.encrypt_password(vals['password'])
-            vals['password_encrypted'] = encrypted
-            vals['state'] = 'draft'  # Reset state when password changes
+            if encrypted:
+                # Convert bytes to string for Text field storage
+                vals['password_encrypted'] = encrypted.decode('utf-8') if isinstance(encrypted, bytes) else encrypted
+                vals['state'] = 'draft'  # Reset state when password changes
             del vals['password']  # Don't store plain text
         return super().write(vals)
+
+    @api.depends('password_encrypted')
+    def _compute_password(self):
+        """Compute method for password field (for form display)"""
+        for record in self:
+            # Don't actually populate password for security
+            record.password = '***' if record.password_encrypted else ''
+
+    def _inverse_password(self):
+        """Inverse method for password field"""
+        for record in self:
+            if record.password and record.password != '***':
+                # This will trigger the write method which handles encryption
+                record.write({'password': record.password})

@@ -32,9 +32,21 @@ class PasswordMixin(models.AbstractModel):
         """Encrypt a password"""
         if not password:
             return False
+
+        # Handle case where password might be boolean (the original error)
+        if isinstance(password, bool):
+            _logger.warning(f"Password field received boolean value: {password}")
+            return False
+
+        # Ensure password is string
+        if not isinstance(password, str):
+            password = str(password)
+
         try:
             fernet = Fernet(self._get_encryption_key())
-            return fernet.encrypt(password.encode('utf-8'))
+            encrypted_bytes = fernet.encrypt(password.encode('utf-8'))
+            # Convert to base64 for proper storage in Binary field
+            return base64.b64encode(encrypted_bytes)
         except Exception as e:
             _logger.error(f"Password encryption failed: {e}")
             return False
@@ -43,9 +55,13 @@ class PasswordMixin(models.AbstractModel):
         """Decrypt a password"""
         if not encrypted_password:
             return None
+
         try:
             fernet = Fernet(self._get_encryption_key())
-            return fernet.decrypt(encrypted_password).decode('utf-8')
+            # Decode from base64 first
+            encrypted_bytes = base64.b64decode(encrypted_password)
+            decrypted_bytes = fernet.decrypt(encrypted_bytes)
+            return decrypted_bytes.decode('utf-8')
         except Exception as e:
             _logger.error(f"Password decryption failed: {e}")
             return None
