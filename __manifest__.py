@@ -34,7 +34,7 @@
 
     # ADD THIS SECTION - External Dependencies
     'external_dependencies': {
-        'python': ['pyodbc'],
+        'python': ['pyodbc', 'cryptography'],
     },
 
     # always loaded

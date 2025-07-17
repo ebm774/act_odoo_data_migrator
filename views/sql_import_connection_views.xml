@@ -39,7 +39,6 @@
                             <field name="server"/>
                             <field name="port"/>
                             <field name="database"/>
-                            <field name="driver"/>
                         </group>
                         <group string="Authentication">
                             <field name="username"/>
