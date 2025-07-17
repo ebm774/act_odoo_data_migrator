@@ -44,7 +44,6 @@ class SqlImportMapping(models.Model):
         return super().create(vals_list)
 
     def fetch_source_columns(self):
-        """Fetch columns from source table"""
         self.ensure_one()
 
         if not self.connection_id or not self.source_table:
@@ -55,19 +54,20 @@ class SqlImportMapping(models.Model):
         try:
             with self.connection_id.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(f"""
-                    SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH
-                    FROM INFORMATION_SCHEMA.COLUMNS
-                    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
-                    ORDER BY ORDINAL_POSITION
-                """, (self.source_schema, self.source_table))
+                cursor.execute("""
+                               SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH
+                               FROM INFORMATION_SCHEMA.COLUMNS
+                               WHERE TABLE_SCHEMA = %s
+                                 AND TABLE_NAME = %s
+                               ORDER BY ORDINAL_POSITION
+                               """, (self.source_schema, self.source_table))
 
                 for row in cursor.fetchall():
                     columns.append({
-                        'name': row.COLUMN_NAME,
-                        'type': row.DATA_TYPE,
-                        'nullable': row.IS_NULLABLE == 'YES',
-                        'length': row.CHARACTER_MAXIMUM_LENGTH
+                        'name': row[0],
+                        'type': row[1],
+                        'nullable': row[2] == 'YES',
+                        'length': row[3]
                     })
 
             return {
@@ -128,12 +128,13 @@ class SqlImportMapping(models.Model):
         try:
             with self.connection_id.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(f"""
-                    SELECT COLUMN_NAME, DATA_TYPE
-                    FROM INFORMATION_SCHEMA.COLUMNS
-                    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
-                    ORDER BY ORDINAL_POSITION
-                """, (self.source_schema, self.source_table))
+                cursor.execute("""
+                               SELECT COLUMN_NAME, DATA_TYPE
+                               FROM INFORMATION_SCHEMA.COLUMNS
+                               WHERE TABLE_SCHEMA = %s
+                                 AND TABLE_NAME = %s
+                               ORDER BY ORDINAL_POSITION
+                               """, (self.source_schema, self.source_table))
 
                 for row in cursor.fetchall():
                     source_columns.append({

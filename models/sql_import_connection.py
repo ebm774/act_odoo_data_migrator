@@ -20,17 +20,17 @@ class SqlImportConnection(models.Model, PasswordMixin):
     database = fields.Char(string='Database', required=True)
     username = fields.Char(string='Username', required=True)
     password_encrypted = fields.Text(string='Encrypted Password', readonly=True)
-    password = fields.Char(string='Password', required=True, store=False)
+    password = fields.Char(
+        string='Password',
+        compute='_compute_password',
+        inverse='_inverse_password',
+        help='Enter password to update stored password'
+    )
 
     available_tables = fields.Text(string='Available Tables', readonly=True)
 
     # Connection options
     timeout = fields.Integer(string='Connection Timeout', default=30)
-    charset = fields.Selection([
-        ('utf8', 'UTF-8'),
-        ('latin1', 'Latin-1'),
-        ('cp1252', 'Windows-1252'),
-    ], string='Character Set', default='utf8')
 
     active = fields.Boolean(default=True)
     state = fields.Selection([
@@ -67,7 +67,7 @@ class SqlImportConnection(models.Model, PasswordMixin):
                 password=password,  # Use decrypted password
                 database=self.database,
                 timeout=self.timeout,
-                charset=self.charset,
+                charset='utf8',
                 as_dict=False  # Return tuples instead of dictionaries for consistency
             )
         except Exception as e:
@@ -276,14 +276,17 @@ class SqlImportConnection(models.Model, PasswordMixin):
 
     @api.depends('password_encrypted')
     def _compute_password(self):
-        """Compute method for password field (for form display)"""
         for record in self:
-            # Don't actually populate password for security
-            record.password = '***' if record.password_encrypted else ''
+            # Show placeholder if password is stored, empty if not
+            if record.password_encrypted:
+                record.password = '••••••••'  # Password placeholder
+            else:
+                record.password = ''
 
     def _inverse_password(self):
         """Inverse method for password field"""
         for record in self:
-            if record.password and record.password != '***':
-                # This will trigger the write method which handles encryption
-                record.write({'password': record.password})
+            if record.password and record.password != '••••••••':
+                # Store the actual password value for processing in write()
+                # The write method will handle encryption
+                pass  # Let write() handle the encryption
