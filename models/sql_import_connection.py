@@ -22,6 +22,8 @@ class SqlImportConnection(models.Model, PasswordMixin):
     password_encrypted = fields.Text(string='Encrypted Password', readonly=True)
     password = fields.Char(string='Password', required=True, store=False)
 
+    available_tables = fields.Text(string='Available Tables', readonly=True)
+
     # Connection options
     timeout = fields.Integer(string='Connection Timeout', default=30)
     charset = fields.Selection([
@@ -34,23 +36,11 @@ class SqlImportConnection(models.Model, PasswordMixin):
     state = fields.Selection([
         ('draft', 'Not Tested'),
         ('connected', 'Connected'),
-        ('error', 'Connection Error')  # Added 'error' state
     ], string='Status', default='draft')
 
     last_connection_date = fields.Datetime(string='Last Connection')
     error_message = fields.Text(string='Error Message', readonly=True)
 
-    @api.model
-    def _check_dependencies(self):
-        """Check if required Python packages are available"""
-        try:
-            import pymssql
-        except ImportError:
-            raise UserError(_(
-                'Missing required Python package: pymssql\n\n'
-                'Please install with:\n'
-                'pip install pymssql'
-            ))
 
     def _get_password(self):
         """Get decrypted password"""
@@ -89,9 +79,6 @@ class SqlImportConnection(models.Model, PasswordMixin):
         self.ensure_one()
 
         try:
-            # Check dependencies first
-            self._check_dependencies()
-
             # create connection
             conn = self._get_pymssql_connection()
 
@@ -122,7 +109,6 @@ class SqlImportConnection(models.Model, PasswordMixin):
 
         except Exception as e:
             self.write({
-                'state': 'error',
                 'error_message': str(e)
             })
             raise UserError(_('Connection failed: %s') % str(e))
@@ -169,6 +155,10 @@ class SqlImportConnection(models.Model, PasswordMixin):
                     'full_name': f"{schema}.{table}"
                 })
 
+            self.write({
+                'available_tables': self._format_tables_for_display(tables)
+            })
+
             return {
                 'type': 'ir.actions.client',
                 'tag': 'display_notification',
@@ -179,8 +169,84 @@ class SqlImportConnection(models.Model, PasswordMixin):
                 }
             }
         finally:
+            conn.close()
+
+    def fetch_tables(self):
+        """Fetch all tables from SQL Server database"""
+        self.ensure_one()
+        tables = []
+
+        # Use get_connection() which now properly returns a connection
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                           SELECT TABLE_SCHEMA, TABLE_NAME
+                           FROM INFORMATION_SCHEMA.TABLES
+                           WHERE TABLE_TYPE = 'BASE TABLE'
+                           ORDER BY TABLE_SCHEMA, TABLE_NAME
+                           """)
+
+            for row in cursor.fetchall():
+                # Handle both pymssql and pyodbc result formats
+                if hasattr(row, 'TABLE_SCHEMA'):
+                    # pyodbc returns named results
+                    schema = row.TABLE_SCHEMA
+                    table = row.TABLE_NAME
+                else:
+                    # pymssql returns tuples
+                    schema = row[0]
+                    table = row[1]
+
+                tables.append({
+                    'schema': schema,
+                    'table': table,
+                    'full_name': f"{schema}.{table}"
+                })
+
+            # STORE THE TABLES IN A FIELD FOR DISPLAY
+            self.write({
+                'available_tables': self._format_tables_for_display(tables)
+            })
+
+            return {
+                'type': 'ir.actions.act_window',
+                'res_model': 'sql.import.connection',
+                'res_id': self.id,
+                'view_mode': 'form',
+                'target': 'current',
+                'context': {
+                    'show_tables_message': True,
+                    'tables_message': f'Found {len(tables)} tables in database {self.database}'
+                }
+            }
+        finally:
             # Always close the connection
             conn.close()
+
+    def _format_tables_for_display(self, tables):
+        """Format tables list for display"""
+        if not tables:
+            return "No tables found"
+
+        formatted = f"Found {len(tables)} tables:\n\n"
+
+        # Group by schema
+        schemas = {}
+        for table in tables:
+            schema = table['schema']
+            if schema not in schemas:
+                schemas[schema] = []
+            schemas[schema].append(table['table'])
+
+        # Format by schema
+        for schema, table_list in schemas.items():
+            formatted += f"Schema: {schema}\n"
+            for table in sorted(table_list):
+                formatted += f"  • {table}\n"
+            formatted += "\n"
+
+        return formatted
 
     @api.model_create_multi
     def create(self, vals_list):

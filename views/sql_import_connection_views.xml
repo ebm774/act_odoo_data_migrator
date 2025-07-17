@@ -50,6 +50,13 @@
                         <field name="last_connection_date" readonly="1"/>
                         <field name="error_message" readonly="1" invisible="state != 'error'"/>
                     </group>
+                    <notebook>
+                        <page string="Available Tables" invisible="available_tables == False">
+                            <field name="available_tables" widget="text" readonly="1"
+                                   style="font-family: monospace; background-color: #f8f9fa; white-space: pre-wrap;"/>
+                        </page>
+                    </notebook>
+
                 </sheet>
             </form>
         </field>
