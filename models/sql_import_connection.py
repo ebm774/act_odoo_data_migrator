@@ -290,3 +290,43 @@ class SqlImportConnection(models.Model, PasswordMixin):
                 # Store the actual password value for processing in write()
                 # The write method will handle encryption
                 pass  # Let write() handle the encryption
+
+    def _fetch_tables_list(self):
+        """Fetch tables and return as list (for selection fields)"""
+        self.ensure_one()
+        tables = []
+
+        if self.state != 'connected':
+            return tables
+
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                           SELECT TABLE_SCHEMA, TABLE_NAME
+                           FROM INFORMATION_SCHEMA.TABLES
+                           WHERE TABLE_TYPE = 'BASE TABLE'
+                           ORDER BY TABLE_SCHEMA, TABLE_NAME
+                           """)
+
+            for row in cursor.fetchall():
+                # Handle both pymssql and pyodbc result formats
+                if hasattr(row, 'TABLE_SCHEMA'):
+                    schema = row.TABLE_SCHEMA
+                    table = row.TABLE_NAME
+                else:
+                    schema = row[0]
+                    table = row[1]
+
+                tables.append({
+                    'schema': schema,
+                    'table': table,
+                    'full_name': f"{schema}.{table}"
+                })
+
+            return tables
+        except Exception as e:
+            _logger.error(f"Failed to fetch tables list: {e}")
+            return []
+        finally:
+            conn.close()

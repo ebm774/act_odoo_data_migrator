@@ -47,6 +47,7 @@
         'views/sql_import_connection_views.xml',
         'views/sql_import_mapping_views.xml',
         'views/sql_import_job_views.xml',
+        'views/sql_legacy_table_views.xml',
 
         # Wizards
         'wizard/import_wizard_views.xml',

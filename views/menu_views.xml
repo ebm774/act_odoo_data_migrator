@@ -24,6 +24,12 @@
         action="action_sql_import_mapping"
         sequence="20"/>
 
+    <menuitem id="menu_sql_legacy_table"
+        name="Legacy Tables"
+        parent="menu_sql_import_config"
+        action="action_sql_legacy_table"
+        sequence="30"/>
+
     <!-- Operations Menu -->
     <menuitem id="menu_sql_import_operations"
         name="Operations"
