@@ -1,6 +1,9 @@
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 import json
+import logging
+
+_logger = logging.getLogger(__name__)
 
 
 class SqlImportMapping(models.Model):
@@ -9,11 +12,11 @@ class SqlImportMapping(models.Model):
     _rec_name = 'name'
 
     name = fields.Char(string='Mapping Name', required=True)
-    connection_id = fields.Many2one('sql.import.connection', string='Connection', required=True)
+    connection_ids  = fields.Many2many('sql.import.connection', string='Connection', required=True)
 
     # Source configuration
     source_schema = fields.Char(string='Source Schema', default='dbo')
-    source_table = fields.Char(string='Source Table', required=True)
+    source_table_id = fields.Many2one('sql.legacy.table', string='Source Table', required=True)
     source_filter = fields.Text(string='WHERE Clause', help='SQL WHERE clause to filter source data')
 
     # Target configuration
@@ -46,13 +49,13 @@ class SqlImportMapping(models.Model):
     def fetch_source_columns(self):
         self.ensure_one()
 
-        if not self.connection_id or not self.source_table:
+        if not self.connection_ids or not self.source_table_id:
             raise UserError(_('Connection and source table must be configured first'))
 
         columns = []
 
         try:
-            with self.connection_id.get_connection() as conn:
+            with self.source_table_id.connection_ids.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                                SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH
@@ -60,7 +63,7 @@ class SqlImportMapping(models.Model):
                                WHERE TABLE_SCHEMA = %s
                                  AND TABLE_NAME = %s
                                ORDER BY ORDINAL_POSITION
-                               """, (self.source_schema, self.source_table))
+                               """, (self.source_schema, self.source_table_id))
 
                 for row in cursor.fetchall():
                     columns.append({
@@ -76,7 +79,7 @@ class SqlImportMapping(models.Model):
                 'params': {
                     'title': _('Source Columns Fetched'),
                     'message': _('Found %d columns in table %s.%s') % (len(columns), self.source_schema,
-                                                                       self.source_table),
+                                                                       self.source_table_id),
                     'type': 'success',
                 }
             }
@@ -120,13 +123,13 @@ class SqlImportMapping(models.Model):
         """Auto-generate field mappings based on field names"""
         self.ensure_one()
 
-        if not self.connection_id or not self.source_table or not self.target_model:
+        if not self.connection_ids or not self.source_table_id or not self.target_model:
             raise UserError(_('Connection, source table, and target model must be configured first'))
 
         # Get source columns
         source_columns = []
         try:
-            with self.connection_id.get_connection() as conn:
+            with self.connection_ids.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                                SELECT COLUMN_NAME, DATA_TYPE
@@ -134,7 +137,7 @@ class SqlImportMapping(models.Model):
                                WHERE TABLE_SCHEMA = %s
                                  AND TABLE_NAME = %s
                                ORDER BY ORDINAL_POSITION
-                               """, (self.source_schema, self.source_table))
+                               """, (self.source_schema, self.source_table_id))
 
                 for row in cursor.fetchall():
                     source_columns.append({
@@ -276,17 +279,21 @@ class SqlImportMapping(models.Model):
 
         # Test with sample data
         try:
-            with self.connection_id.get_connection() as conn:
+            with self.connection_ids.get_connection() as conn:
                 cursor = conn.cursor()
                 mappings = json.loads(self.field_mappings)
-                source_fields = [m['source_field'] for m in mappings]
+
+                # Properly quote field names with square brackets for SQL Server
+                quoted_fields = [f'[{m["source_field"]}]' for m in mappings]
+                quoted_table = f'[{self.source_schema}].[{self.source_table_id.table_name}]'
 
                 test_query = f"""
-                    SELECT TOP 5 {', '.join(source_fields)}
-                    FROM {self.source_schema}.{self.source_table}
+                    SELECT TOP 5 {', '.join(quoted_fields)}
+                    FROM {quoted_table}
                     {f'WHERE {self.source_filter}' if self.source_filter else ''}
                 """
 
+                _logger.debug(f"Executing test query: {test_query}")
                 cursor.execute(test_query)
                 rows = cursor.fetchall()
 
@@ -301,4 +308,6 @@ class SqlImportMapping(models.Model):
                 }
 
         except Exception as e:
+            _logger.error(
+                f"Mapping test failed with query: {test_query if 'test_query' in locals() else 'Query not built'}")
             raise UserError(_('Mapping test failed: %s') % str(e))

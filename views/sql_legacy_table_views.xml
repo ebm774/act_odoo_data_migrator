@@ -38,7 +38,6 @@
                         <group string="Table Information">
                             <field name="connection_id" options="{'no_create': True}"/>
                             <field name="schema_name"/>
-                            <field name="table_name"/>
                         </group>
                     </group>
                 </sheet>

@@ -13,7 +13,7 @@ class SqlLegacyTable(models.Model):
 
     connection_id = fields.Many2one('sql.import.connection', string='Connection', required=True)
     schema_name = fields.Char(string='Schema', required=True)
-    table_name = fields.Char(string='Table', required=True)
+    table_name = fields.Char(string='Table')
     full_name = fields.Char(string='Full Name', compute='_compute_full_name', store=True)
 
     @api.depends('schema_name', 'table_name')
