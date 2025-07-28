@@ -2,6 +2,7 @@ from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 import json
 import logging
+import hashlib
 from datetime import datetime
 from dateutil import parser
 
@@ -34,6 +35,18 @@ class SqlImportJob(models.Model):
     imported_records = fields.Integer(string='Imported Records')
     failed_records = fields.Integer(string='Failed Records')
     progress = fields.Float(string='Progress %', compute='_compute_progress')
+
+
+    # data integrity checkup
+    verification_enabled = fields.Boolean(string='Enable Data Verification', default=True)
+    verification_status = fields.Selection([
+        ('pending', 'Verification Pending'),
+        ('running', 'Verification Running'),
+        ('passed', 'Verification Passed'),
+        ('failed', 'Verification Failed')
+    ], string='Verification Status', default='pending')
+    checksum_mismatches = fields.Integer(string='Checksum Mismatches', default=0)
+    verification_details = fields.Text(string='Verification Details')
 
     # Logging
     log_entries = fields.Text(string='Import Log')
@@ -142,7 +155,6 @@ class SqlImportJob(models.Model):
                 FROM [{mapping.source_table_id.schema_name}].[{mapping.source_table_id.table_name}]  
                 {f'WHERE {mapping.source_filter}' if mapping.source_filter else ''}
             """
-            self._log(select_query)
             cursor.execute(select_query)
 
             # Process in batches
@@ -189,6 +201,315 @@ class SqlImportJob(models.Model):
                 # Commit batch
                 self.env.cr.commit()
                 self._log(f'Processed {self.imported_records + self.failed_records}/{self.total_records} records')
+
+        if self.verification_enabled:
+            self._log('Starting data verification ...')
+            self._verify_imported_data()
+
+
+    def _verify_imported_data(self):
+        self.write({'verification_status' : 'running'})
+
+        mapping = self.mapping_id
+        field_mappings = json.loads(mapping.field_mappings or '[]')
+
+        mismatches = []
+        total_verified = 0
+
+        try:
+            source_checksums = self._get_source_checksums(field_mappings)
+            target_checksums = self._get_target_checksums(field_mappings)
+
+            for source_key, source_checksum in source_checksums.items():
+
+                total_verified += 1
+
+                if source_key not in target_checksums:
+                    mismatches.append(f"Missing record:  {source_key}")
+
+                elif source_checksum != target_checksums[source_key]:
+                    mismatches.append(f"Check mismatch for record : {source_key}")
+
+            for target_key in target_checksums:
+                if target_key not in source_checksums:
+                    mismatches.append(f"Extra record in target:  {target_key}")
+
+            self.write({
+                'checksum_mismatches': len(mismatches),
+                'verification_status': 'failed' if mismatches else 'passed',
+                'verification_details': '\n'.join(mismatches) if mismatches else f'All {total_verified} records verified successfully'
+            })
+
+            if mismatches:
+                self._log(f'Verification failed: {len(mismatches)} mismatches found', 'warning')
+            else:
+                self._log(f'Verification passed: All {total_verified} records match', 'info')
+
+        except Exception as e :
+            self.write({
+                'verification_status': 'failed',
+                'verification_details': f'Verification error : {str(e)}'
+            })
+
+            self._log(f'Verification error : {str(e)}', 'error')
+
+    def _get_source_checksums(self, field_mappings):
+
+        checksums = {}
+        mapping = self.mapping_id
+
+        with mapping.connection_ids.get_connection() as conn:
+            cursor = conn.cursor()
+            schema_name = mapping.source_table_id.schema_name
+            table_name = mapping.source_table_id.table_name
+
+            self._log(f'Getting column info for {schema_name}.{table_name}')
+
+            # Get column information including data types
+            try:
+                cursor.execute("""
+                               SELECT COLUMN_NAME,
+                                      DATA_TYPE,
+                                      CHARACTER_MAXIMUM_LENGTH,
+                                      NUMERIC_PRECISION,
+                                      NUMERIC_SCALE
+                               FROM INFORMATION_SCHEMA.COLUMNS
+                               WHERE TABLE_SCHEMA = %s
+                                 AND TABLE_NAME = %s
+                               ORDER BY ORDINAL_POSITION
+                               """, (schema_name, table_name))
+
+                column_info = {row[0]: {
+                    'data_type': row[1].lower(),
+                    'max_length': row[2],
+                    'precision': row[3],
+                    'scale': row[4]
+                } for row in cursor.fetchall()}
+
+                self._log(f'Found {len(column_info)} columns: {list(column_info.keys())}')
+
+            except Exception as e:
+                self._log(f'Column query failed: {str(e)}', 'error')
+                # # Fallback: try without schema filtering
+                # cursor.execute("""
+                #                SELECT COLUMN_NAME,
+                #                       DATA_TYPE,
+                #                       CHARACTER_MAXIMUM_LENGTH,
+                #                       NUMERIC_PRECISION,
+                #                       NUMERIC_SCALE
+                #                FROM INFORMATION_SCHEMA.COLUMNS
+                #                WHERE TABLE_NAME = %s
+                #                ORDER BY ORDINAL_POSITION
+                #                """, (table_name,))
+                #
+                # column_info = {row[0]: {
+                #     'data_type': row[1].lower(),
+                #     'max_length': row[2],
+                #     'precision': row[3],
+                #     'scale': row[4]
+                # } for row in cursor.fetchall()}
+                #
+                # self._log(f'Fallback found {len(column_info)} columns')
+
+            if not column_info:
+                raise UserError(f'No columns found for table {schema_name}.{table_name}')
+
+            # Build checksum calculation for each field with proper type handling
+            checksum_parts = []
+            self.binary_field_count = 0
+            text_field_count = 0
+
+            for field_mapping in field_mappings:
+                field = field_mapping['source_field']
+
+                if field not in column_info:
+                    self._log(f'Warning: Field {field} not found in table columns', 'warning')
+
+                    checksum_parts.append("'MISSING_FIELD'")
+                    continue
+
+                info = column_info[field]
+                data_type = info['data_type']
+
+                checksum_part = self._source_datatype_management(data_type, field)
+
+                checksum_parts.append(checksum_part)
+
+            # Log special field handling
+            if self.binary_field_count > 0:
+                self._log(f'Found {self.binary_field_count} binary fields - using length + signature for verification')
+            if text_field_count > 0:
+                self._log(f'Found {text_field_count} large text fields - using length + checksum for verification')
+
+            # Create final checksum query
+            if not checksum_parts:
+                raise UserError('No valid fields found for checksum calculation')
+
+            checksum_concat = " + '|' + ".join(checksum_parts)
+
+            query = f"""
+            SELECT 
+                ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) as row_num,
+                CHECKSUM({checksum_concat}) as row_checksum
+            FROM [{schema_name}].[{table_name}]
+            {f'WHERE {mapping.source_filter}' if mapping.source_filter else ''}
+            ORDER BY (SELECT NULL)
+            """
+
+            self._log(f'Executing checksum query for {len(field_mappings)} fields')
+
+            try:
+                cursor.execute(query)
+                row_count = 0
+
+                for row in cursor.fetchall():
+                    row_count += 1
+                    checksums[row[0]] = row[1]  # row_num -> checksum
+
+                self._log(f'Generated checksums for {row_count} records')
+
+            except Exception as e:
+                self._log(f'Checksum query failed: {str(e)}', 'error')
+                # Log the problematic query for debugging
+                self._log(f'Failed query: {query}', 'error')
+                raise UserError(f'Failed to generate source checksums: {str(e)}')
+
+        return checksums
+
+    def _source_datatype_management(self, data_type, field):
+
+
+        if data_type in ['image', 'varbinary', 'binary']:
+            self.binary_field_count += 1
+            checksum_part = f"""
+                 ISNULL(
+                     CAST(DATALENGTH([{field}]) AS NVARCHAR(20)) + ':' +
+                     CASE 
+                         WHEN DATALENGTH([{field}]) > 0 THEN
+                             ISNULL(CONVERT(NVARCHAR(50), SUBSTRING([{field}], 1, CASE WHEN DATALENGTH([{field}]) >= 16 THEN 16 ELSE DATALENGTH([{field}]) END), 2), '') + ':' +
+                             CASE 
+                                 WHEN DATALENGTH([{field}]) > 16 THEN ISNULL(CONVERT(NVARCHAR(50), SUBSTRING([{field}], DATALENGTH([{field}]) - 15, 16), 2), '')
+                                 ELSE ''
+                             END
+                         ELSE 'EMPTY'
+                     END,
+                     'NULL'
+                 )"""
+
+        elif data_type in ['text', 'ntext']:
+            # For large text fields: use length + checksum of content
+            self.binary_field_count += 1
+            checksum_part = f"""
+                 ISNULL(
+                     CAST(LEN([{field}]) AS NVARCHAR(20)) + ':' +
+                     CAST(CHECKSUM([{field}]) AS NVARCHAR(20)),
+                     'NULL'
+                 )"""
+
+        elif data_type in ['datetime', 'datetime2', 'smalldatetime']:
+            # For datetime fields: use ISO format
+            checksum_part = f"ISNULL(CONVERT(NVARCHAR(50), [{field}], 121), 'NULL')"
+
+        elif data_type == 'date':
+            # For date fields: use ISO date format
+            checksum_part = f"ISNULL(CONVERT(NVARCHAR(50), [{field}], 23), 'NULL')"
+
+        elif data_type == 'time':
+            # For time fields: use standard time format
+            checksum_part = f"ISNULL(CONVERT(NVARCHAR(50), [{field}], 108), 'NULL')"
+
+        elif data_type in ['float', 'real']:
+            # For floating point: ensure consistent precision
+            checksum_part = f"ISNULL(CAST([{field}] AS NVARCHAR(50)), 'NULL')"
+
+        elif data_type in ['decimal', 'numeric', 'money', 'smallmoney']:
+            # For precise numeric: maintain precision
+            checksum_part = f"ISNULL(CAST([{field}] AS NVARCHAR(50)), 'NULL')"
+
+        elif data_type in ['bit']:
+            # For boolean: normalize to 0/1
+            checksum_part = f"ISNULL(CAST([{field}] AS NVARCHAR(1)), 'NULL')"
+
+        elif data_type in ['uniqueidentifier']:
+            # For GUIDs: use string representation
+            checksum_part = f"ISNULL(CAST([{field}] AS NVARCHAR(50)), 'NULL')"
+
+        else:
+            # For other types: safe string conversion
+            checksum_part = f"ISNULL(CAST([{field}] AS NVARCHAR(MAX)), 'NULL')"
+            
+        return checksum_part
+
+    def _get_target_checksums(self, field_mappings):
+        checksums = {}
+        mapping = self.mapping_id
+
+        target_model = self.env[mapping.target_model]
+        records = target_model.search([], order='id')
+
+        for i, record in enumerate(records, 1):
+
+            values = []
+
+            for field_mapping in field_mappings:
+
+                field = field_mapping['target_field']
+                transform = field_mapping.get('transform', 'direct')
+                value = getattr(record, field, None)
+
+                if value is None or value is False:
+                    normalized_value = 'NULL'
+                elif transform == 'bool':
+                    normalized_value = '1' if value else '0'
+                elif transform in ['int', 'float']:
+                    normalized_value = str(value)
+                elif transform in ['date', 'datetime']:
+                    normalized_value = str(value) if value else 'NULL'
+                else:
+                    normalized_value = str(value).strip()
+
+                values.append(normalized_value)
+
+            checksum_string = '|'.join(values)
+            checksum = hashlib.md5(checksum_string.encode('utf-8')).hexdigest()
+            checksums[i] = checksum
+
+        return checksums
+
+    def action_verify_data(self):
+        """Manual verification trigger"""
+        self.ensure_one()
+
+        if self.state != 'done':
+            raise UserError(_('Can only verify completed import jobs'))
+
+        self._log('Manual verification triggered')
+        self._verify_imported_data()
+
+        return {
+            'type': 'ir.actions.act_window',
+            'res_model': 'sql.import.job',
+            'res_id': self.id,
+            'view_mode': 'form',
+            'target': 'current',
+        }
+
+    def action_show_verification_report(self):
+        self.ensure_one()
+
+        if not self.verification_details:
+            raise UserError(_('No verification details'))
+
+        return {
+            'type': 'ir.actions.act_window',
+            'name': f'Verification Report - {self.name}',
+            'res_model': 'sql.import.job',
+            'res_id': self.id,
+            'view_mode': 'form',
+            'target': 'new',
+            'context': {'show_verification_details': True}
+        }
+
 
     def _prepare_record_data(self, row, field_mappings):
         """Transform SQL row to Odoo record data"""

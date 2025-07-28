@@ -35,6 +35,8 @@
                         class="btn-danger" invisible="state != 'running'"/>
                     <button name="action_retry" type="object" string="Retry"
                          invisible="state not in ['error', 'cancelled']"/>
+                    <button name="action_verify_data" type="object" string="Verify Data"
+                        class="btn-info" invisible="state != 'done'"/>
                     <field name="state" widget="statusbar" options="{'statusbar_visible': ['draft', 'running', 'done']}"/>
                 </header>
                 <sheet>
@@ -55,6 +57,14 @@
                             <field name="imported_records" readonly="1"/>
                             <field name="failed_records" readonly="1"/>
                         </group>
+                        <group string="Data Verification" invisible="verification_status == 'pending'">
+                            <field name="verification_enabled"/>
+                            <field name="verification_status" widget="badge"
+                                decoration-success="verification_status == 'passed'"
+                                decoration-danger="verification_status == 'failed'"
+                                decoration-warning="verification_status == 'running'"/>
+                            <field name="checksum_mismatches" invisible="checksum_mismatches == 0"/>
+                        </group>
                     </group>
                     <group string="Execution Details" invisible="state == 'draft'">
                         <field name="start_date" readonly="1"/>
@@ -68,6 +78,10 @@
                         </page>
                         <page string="Error Details" invisible="error_message == False">
                             <field name="error_message" readonly="1"/>
+                        </page>
+                        <page string="Verification Details" invisible="verification_details == False">
+                            <field name="verification_details" widget="text" readonly="1"
+                                style="font-family: monospace; background-color: #f8f9fa;"/>
                         </page>
                     </notebook>
                 </sheet>
