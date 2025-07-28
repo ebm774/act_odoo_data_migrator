@@ -119,29 +119,30 @@ class SqlImportJob(models.Model):
 
         # Count total records
         self._log('Counting source records...')
-        with mapping.connection_id.get_connection() as conn:
+
+        with mapping.connection_ids.get_connection() as conn:
             cursor = conn.cursor()
             count_query = f"""
                 SELECT COUNT(*) 
-                FROM {mapping.source_schema}.{mapping.source_table}
-                {f'WHERE {mapping.source_filter}' if mapping.source_filter else ''}
+                FROM [{mapping.source_table_id.schema_name}].[{mapping.source_table_id.table_name}]  
             """
+
             cursor.execute(count_query)
             self.total_records = cursor.fetchone()[0]
             self._log(f'Found {self.total_records} records to import')
 
         # Fetch and import data
-        with mapping.connection_id.get_connection() as conn:
+        with mapping.connection_ids.get_connection() as conn:
             cursor = conn.cursor()
 
             # Build select query
             source_fields = [m['source_field'] for m in field_mappings]
             select_query = f"""
                 SELECT {', '.join(source_fields)}
-                FROM {mapping.source_schema}.{mapping.source_table}
+                FROM [{mapping.source_table_id.schema_name}].[{mapping.source_table_id.table_name}]  
                 {f'WHERE {mapping.source_filter}' if mapping.source_filter else ''}
             """
-
+            self._log(select_query)
             cursor.execute(select_query)
 
             # Process in batches
