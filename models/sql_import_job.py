@@ -315,6 +315,9 @@ class SqlImportJob(models.Model):
             for field_mapping in field_mappings:
                 field = field_mapping['source_field']
 
+                if field in ['Attachment']:
+                    continue
+
                 if field not in column_info:
                     self._log(f'Warning: Field {field} not found in table columns', 'warning')
 
@@ -348,7 +351,7 @@ class SqlImportJob(models.Model):
             query = f"""
             SELECT 
                 ROW_NUMBER() OVER (ORDER BY [{order_field}]) as row_num,
-                CHECKSUM({checksum_concat}) as row_checksum
+                {checksum_concat} as concatenated_values
             FROM [{schema_name}].[{table_name}]
             {f'WHERE {mapping.source_filter}' if mapping.source_filter else ''}
             ORDER BY [{order_field}]
@@ -362,7 +365,9 @@ class SqlImportJob(models.Model):
 
                 for row in cursor.fetchall():
                     row_count += 1
-                    checksums[row[0]] = row[1]  # row_num -> checksum
+                    concat_string = str(row[1]) if row[1] is not None else ''
+                    checksum = sum(ord(char) for char in concat_string) % (2 ** 31)
+                    checksums[row[0]] = checksum
 
                 self._log(f'Generated checksums for {row_count} records')
 
@@ -438,7 +443,10 @@ class SqlImportJob(models.Model):
         mapping = self.mapping_id
 
         target_model = self.env[mapping.target_model]
-        records = target_model.search([], order='id')
+        records = target_model.search([], order='legacy_id')
+
+        self._log(f'Target fields being checksummed: {[fm["target_field"] for fm in field_mappings]}')
+        self._log(f'Target record count: {len(records)}')
 
         for i, record in enumerate(records, 1):
 
@@ -448,6 +456,10 @@ class SqlImportJob(models.Model):
 
                 field = field_mapping['target_field']
                 transform = field_mapping.get('transform', 'direct')
+
+                if field in ['create_uid', 'write_uid', 'create_date', 'write_date', 'attachment_data']:
+                    continue
+
                 value = getattr(record, field, None)
 
                 if value is None or value is False:
@@ -455,9 +467,23 @@ class SqlImportJob(models.Model):
                 elif transform == 'bool':
                     normalized_value = '1' if value else '0'
                 elif transform in ['int', 'float']:
-                    normalized_value = str(value)
+                    # Format numbers consistently with SQL Server
+                    if isinstance(value, float):
+                        normalized_value = f"{value:.6f}".rstrip('0').rstrip('.')
+                    else:
+                        normalized_value = str(value)
                 elif transform in ['date', 'datetime']:
-                    normalized_value = str(value) if value else 'NULL'
+                    if value:
+                        # Format dates consistently with SQL Server format
+                        if hasattr(value, 'strftime'):
+                            if transform == 'date':
+                                normalized_value = value.strftime('%Y-%m-%d')
+                            else:
+                                normalized_value = value.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                        else:
+                            normalized_value = str(value)
+                    else:
+                        normalized_value = 'NULL'
                 else:
                     normalized_value = str(value).strip()
 
