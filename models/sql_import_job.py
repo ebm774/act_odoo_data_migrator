@@ -220,6 +220,18 @@ class SqlImportJob(models.Model):
             source_checksums = self._get_source_checksums(field_mappings)
             target_checksums = self._get_target_checksums(field_mappings)
 
+            self._log(f'Source records count: {len(source_checksums)}')
+            self._log(f'Target records count: {len(target_checksums)}')
+
+            source_keys = list(source_checksums.keys())[:3]
+            target_keys = list(target_checksums.keys())[:3]
+            self._log(f'First 3 source keys: {source_keys}')
+            self._log(f'First 3 target keys: {target_keys}')
+
+            for key in source_keys:
+                if key in source_checksums and key in target_checksums:
+                    self._log(f'Key {key}: Source={source_checksums[key]}, Target={target_checksums[key]}')
+
             for source_key, source_checksum in source_checksums.items():
 
                 total_verified += 1
@@ -290,33 +302,14 @@ class SqlImportJob(models.Model):
 
             except Exception as e:
                 self._log(f'Column query failed: {str(e)}', 'error')
-                # # Fallback: try without schema filtering
-                # cursor.execute("""
-                #                SELECT COLUMN_NAME,
-                #                       DATA_TYPE,
-                #                       CHARACTER_MAXIMUM_LENGTH,
-                #                       NUMERIC_PRECISION,
-                #                       NUMERIC_SCALE
-                #                FROM INFORMATION_SCHEMA.COLUMNS
-                #                WHERE TABLE_NAME = %s
-                #                ORDER BY ORDINAL_POSITION
-                #                """, (table_name,))
-                #
-                # column_info = {row[0]: {
-                #     'data_type': row[1].lower(),
-                #     'max_length': row[2],
-                #     'precision': row[3],
-                #     'scale': row[4]
-                # } for row in cursor.fetchall()}
-                #
-                # self._log(f'Fallback found {len(column_info)} columns')
+
 
             if not column_info:
                 raise UserError(f'No columns found for table {schema_name}.{table_name}')
 
             # Build checksum calculation for each field with proper type handling
             checksum_parts = []
-            self.binary_field_count = 0
+            binary_field_count = 0
             text_field_count = 0
 
             for field_mapping in field_mappings:
@@ -331,13 +324,17 @@ class SqlImportJob(models.Model):
                 info = column_info[field]
                 data_type = info['data_type']
 
-                checksum_part = self._source_datatype_management(data_type, field)
+                checksum_part, binary_count, text_count = self._source_datatype_management(
+                    data_type, field, binary_field_count, text_field_count)
+
 
                 checksum_parts.append(checksum_part)
+                binary_field_count = binary_count
+                text_field_count = text_count
 
             # Log special field handling
-            if self.binary_field_count > 0:
-                self._log(f'Found {self.binary_field_count} binary fields - using length + signature for verification')
+            if binary_field_count > 0:
+                self._log(f'Found {binary_field_count} binary fields - using length + signature for verification')
             if text_field_count > 0:
                 self._log(f'Found {text_field_count} large text fields - using length + checksum for verification')
 
@@ -346,14 +343,15 @@ class SqlImportJob(models.Model):
                 raise UserError('No valid fields found for checksum calculation')
 
             checksum_concat = " + '|' + ".join(checksum_parts)
+            order_field = field_mappings[0]['source_field']
 
             query = f"""
             SELECT 
-                ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) as row_num,
+                ROW_NUMBER() OVER (ORDER BY [{order_field}]) as row_num,
                 CHECKSUM({checksum_concat}) as row_checksum
             FROM [{schema_name}].[{table_name}]
             {f'WHERE {mapping.source_filter}' if mapping.source_filter else ''}
-            ORDER BY (SELECT NULL)
+            ORDER BY [{order_field}]
             """
 
             self._log(f'Executing checksum query for {len(field_mappings)} fields')
@@ -376,11 +374,13 @@ class SqlImportJob(models.Model):
 
         return checksums
 
-    def _source_datatype_management(self, data_type, field):
-
+    def _source_datatype_management(self, data_type, field, binary_field_count=0, text_field_count=0):
+        # Create local copies to modify
+        local_binary_count = binary_field_count
+        local_text_count = text_field_count
 
         if data_type in ['image', 'varbinary', 'binary']:
-            self.binary_field_count += 1
+            local_binary_count += 1
             checksum_part = f"""
                  ISNULL(
                      CAST(DATALENGTH([{field}]) AS NVARCHAR(20)) + ':' +
@@ -398,7 +398,8 @@ class SqlImportJob(models.Model):
 
         elif data_type in ['text', 'ntext']:
             # For large text fields: use length + checksum of content
-            self.binary_field_count += 1
+            local_binary_count += 1
+            local_text_count += 1
             checksum_part = f"""
                  ISNULL(
                      CAST(LEN([{field}]) AS NVARCHAR(20)) + ':' +
@@ -407,38 +408,30 @@ class SqlImportJob(models.Model):
                  )"""
 
         elif data_type in ['datetime', 'datetime2', 'smalldatetime']:
-            # For datetime fields: use ISO format
             checksum_part = f"ISNULL(CONVERT(NVARCHAR(50), [{field}], 121), 'NULL')"
 
         elif data_type == 'date':
-            # For date fields: use ISO date format
             checksum_part = f"ISNULL(CONVERT(NVARCHAR(50), [{field}], 23), 'NULL')"
 
         elif data_type == 'time':
-            # For time fields: use standard time format
             checksum_part = f"ISNULL(CONVERT(NVARCHAR(50), [{field}], 108), 'NULL')"
 
         elif data_type in ['float', 'real']:
-            # For floating point: ensure consistent precision
             checksum_part = f"ISNULL(CAST([{field}] AS NVARCHAR(50)), 'NULL')"
 
         elif data_type in ['decimal', 'numeric', 'money', 'smallmoney']:
-            # For precise numeric: maintain precision
             checksum_part = f"ISNULL(CAST([{field}] AS NVARCHAR(50)), 'NULL')"
 
         elif data_type in ['bit']:
-            # For boolean: normalize to 0/1
             checksum_part = f"ISNULL(CAST([{field}] AS NVARCHAR(1)), 'NULL')"
 
         elif data_type in ['uniqueidentifier']:
-            # For GUIDs: use string representation
             checksum_part = f"ISNULL(CAST([{field}] AS NVARCHAR(50)), 'NULL')"
 
         else:
-            # For other types: safe string conversion
             checksum_part = f"ISNULL(CAST([{field}] AS NVARCHAR(MAX)), 'NULL')"
-            
-        return checksum_part
+
+        return checksum_part, local_binary_count, local_text_count
 
     def _get_target_checksums(self, field_mappings):
         checksums = {}
@@ -471,7 +464,7 @@ class SqlImportJob(models.Model):
                 values.append(normalized_value)
 
             checksum_string = '|'.join(values)
-            checksum = hashlib.md5(checksum_string.encode('utf-8')).hexdigest()
+            checksum = sum(ord(char) for char in checksum_string) % (2**31)
             checksums[i] = checksum
 
         return checksums
