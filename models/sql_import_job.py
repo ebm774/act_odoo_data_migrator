@@ -448,6 +448,9 @@ class SqlImportJob(models.Model):
         self._log(f'Target fields being checksummed: {[fm["target_field"] for fm in field_mappings]}')
         self._log(f'Target record count: {len(records)}')
 
+        source_field_order = [fm['source_field'] for fm in field_mappings]
+        self._log(f'Source field order: {source_field_order}')
+
         for i, record in enumerate(records, 1):
 
             values = []
@@ -457,7 +460,7 @@ class SqlImportJob(models.Model):
                 field = field_mapping['target_field']
                 transform = field_mapping.get('transform', 'direct')
 
-                if field in ['create_uid', 'write_uid', 'create_date', 'write_date', 'attachment_data']:
+                if field in ['create_uid', 'write_uid', 'create_date', 'write_date', 'attachment_data', 'display_name']:
                     continue
 
                 value = getattr(record, field, None)
@@ -466,14 +469,30 @@ class SqlImportJob(models.Model):
                     normalized_value = 'NULL'
                 elif transform == 'bool':
                     normalized_value = '1' if value else '0'
-                elif transform in ['int', 'float']:
-                    # Format numbers consistently with SQL Server
-                    if isinstance(value, float):
-                        normalized_value = f"{value:.6f}".rstrip('0').rstrip('.')
+                elif transform == 'int':
+                    if value is False or value is None:
+                        normalized_value = 'NULL'
                     else:
-                        normalized_value = str(value)
+                        try:
+                            normalized_value = str(int(value))
+                        except (ValueError, TypeError):
+                            normalized_value = 'NULL'
+                elif transform =='float':
+                    if value == False or value is None:
+                        normalized_value = 'NULL'
+                    elif value == 0 or value == 0.0:
+                        normalized_value = '0'
+                    else:
+                        try:
+                            float_val = float(value)
+                            if float_val.is_integer():
+                                normalized_value = str(int(float_val))  # 120.0 -> "120"
+                            else:
+                                normalized_value = f"{float_val:.6f}".rstrip('0').rstrip('.')
+                        except (ValueError, TypeError):
+                            normalized_value = 'NULL'
                 elif transform in ['date', 'datetime']:
-                    if value:
+                    if value and value != False:
                         # Format dates consistently with SQL Server format
                         if hasattr(value, 'strftime'):
                             if transform == 'date':
@@ -484,8 +503,18 @@ class SqlImportJob(models.Model):
                             normalized_value = str(value)
                     else:
                         normalized_value = 'NULL'
+                elif transform == 'str':
+                    if value == False :
+                        normalized_value = 'NULL'
+                    elif value == '':
+                        normalized_value = ''
+                    else :
+                        normalized_value = str(value).strip()
                 else:
-                    normalized_value = str(value).strip()
+                    if value == False:
+                        normalized_value = 'NULL'
+                    else:
+                        normalized_value = str(value).strip()
 
                 values.append(normalized_value)
 
@@ -544,13 +573,28 @@ class SqlImportJob(models.Model):
                 if transform == 'direct':
                     data[target_field] = source_value
                 elif transform == 'bool':
-                    data[target_field] = bool(source_value) if source_value is not None else False
+                    if source_value is None:
+                        data[target_field] = False
+                    else:
+                        data[target_field] = bool(source_value)
                 elif transform == 'int':
-                    data[target_field] = int(source_value) if source_value is not None else 0
+                    if source_value is None:
+                        data[target_field] = False  # Odoo uses False for NULL integers
+                    else:
+                        data[target_field] = int(source_value)
                 elif transform == 'float':
-                    data[target_field] = float(source_value) if source_value is not None else 0.0
+                    if source_value is None:
+                        data[target_field] = False  # Odoo uses False for NULL floats
+                    else:
+                        # Preserve original precision by converting back to source format
+                        data[target_field] = float(source_value)
                 elif transform == 'str':
-                    data[target_field] = str(source_value) if source_value is not None else ''
+                    if source_value is None:
+                        data[target_field] = False  # Odoo uses False for NULL strings
+                    elif source_value == '':
+                        data[target_field] = ''  # Preserve empty strings as empty strings
+                    else:
+                        data[target_field] = str(source_value).strip()
                 elif transform == 'date':
                     if source_value:
                         if isinstance(source_value, str):
