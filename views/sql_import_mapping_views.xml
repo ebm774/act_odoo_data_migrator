@@ -3,7 +3,7 @@
     <!-- Tree View -->
     <record id="view_sql_import_mapping_tree" model="ir.ui.view">
         <field name="name">sql.import.mapping.tree</field>
-        <field name="model">sql.import.mapping</field>
+        <field name="model">dat.sql.import.mapping</field>
         <field name="arch" type="xml">
             <list>
                 <field name="name"/>
@@ -19,7 +19,7 @@
     <!-- Form View -->
     <record id="view_sql_import_mapping_form" model="ir.ui.view">
         <field name="name">sql.import.mapping.form</field>
-        <field name="model">sql.import.mapping</field>
+        <field name="model">dat.sql.import.mapping</field>
         <field name="arch" type="xml">
             <form>
                 <header>
@@ -117,7 +117,7 @@
     <!-- Action -->
     <record id="action_sql_import_mapping" model="ir.actions.act_window">
         <field name="name">Import Mappings</field>
-        <field name="res_model">sql.import.mapping</field>
+        <field name="res_model">dat.sql.import.mapping</field>
         <field name="view_mode">list,form</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">

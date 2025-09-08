@@ -10,7 +10,7 @@ _logger = logging.getLogger(__name__)
 
 
 class SqlImportConnection(models.Model, PasswordMixin):
-    _name = 'sql.import.connection'
+    _name = 'dat.sql.import.connection'
     _description = 'SQL Server Connection Configuration'
     _rec_name = 'name'
 
@@ -97,7 +97,7 @@ class SqlImportConnection(models.Model, PasswordMixin):
 
             return {
                 'type': 'ir.actions.act_window',
-                'res_model': 'sql.import.connection',
+                'res_model': 'dat.sql.import.connection',
                 'res_id': self.id,
                 'view_mode': 'form',
                 'target': 'current',
@@ -211,7 +211,7 @@ class SqlImportConnection(models.Model, PasswordMixin):
 
             return {
                 'type': 'ir.actions.act_window',
-                'res_model': 'sql.import.connection',
+                'res_model': 'dat.sql.import.connection',
                 'res_id': self.id,
                 'view_mode': 'form',
                 'target': 'current',

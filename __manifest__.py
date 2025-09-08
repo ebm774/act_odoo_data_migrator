@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 {
-    'name': "Data Migrator",
+    'name': "Datamigrator",
 
     'summary': "Import data from SQL Server 2014 to Odoo",
 

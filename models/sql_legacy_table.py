@@ -7,11 +7,11 @@ _logger = logging.getLogger(__name__)
 
 
 class SqlLegacyTable(models.Model):
-    _name = 'sql.legacy.table'
+    _name = 'dat.sql.legacy.table'
     _description = 'SQL legacy tables'
     _rec_name = 'full_name'
 
-    connection_id = fields.Many2one('sql.import.connection', string='Connection', required=True)
+    connection_id = fields.Many2one('dat.sql.import.connection', string='Connection', required=True)
     schema_name = fields.Char(string='Schema', required=True)
     table_name = fields.Char(string='Table')
     full_name = fields.Char(string='Full Name', compute='_compute_full_name', store=True)
@@ -27,7 +27,7 @@ class SqlLegacyTable(models.Model):
     @api.model
     def refresh_tables_for_connection(self, connection_id):
         """Refresh table list for a specific connection"""
-        connection = self.env['sql.import.connection'].browse(connection_id)
+        connection = self.env['dat.sql.import.connection'].browse(connection_id)
         if not connection.exists() or connection.state != 'connected':
             raise UserError(_('Connection must be tested and connected first'))
 

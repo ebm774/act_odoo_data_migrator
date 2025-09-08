@@ -10,13 +10,13 @@ _logger = logging.getLogger(__name__)
 
 
 class SqlImportJob(models.Model):
-    _name = 'sql.import.job'
+    _name = 'dat.sql.import.job'
     _description = 'SQL Import Job'
     _order = 'create_date desc'
     _rec_name = 'name'
 
     name = fields.Char(string='Job Name', required=True, default=lambda self: self._get_default_name())
-    mapping_id = fields.Many2one('sql.import.mapping', string='Mapping', required=True)
+    mapping_id = fields.Many2one('dat.sql.import.mapping', string='Mapping', required=True)
 
     state = fields.Selection([
         ('draft', 'Draft'),
@@ -536,7 +536,7 @@ class SqlImportJob(models.Model):
 
         return {
             'type': 'ir.actions.act_window',
-            'res_model': 'sql.import.job',
+            'res_model': 'dat.sql.import.job',
             'res_id': self.id,
             'view_mode': 'form',
             'target': 'current',

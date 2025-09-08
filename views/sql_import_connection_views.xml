@@ -3,7 +3,7 @@
     <!-- Tree View -->
     <record id="view_sql_import_connection_tree" model="ir.ui.view">
         <field name="name">sql.import.connection.tree</field>
-        <field name="model">sql.import.connection</field>
+        <field name="model">dat.sql.import.connection</field>
         <field name="arch" type="xml">
             <list>
                 <field name="name"/>
@@ -20,7 +20,7 @@
     <!-- Form View -->
     <record id="view_sql_import_connection_form" model="ir.ui.view">
         <field name="name">sql.import.connection.form</field>
-        <field name="model">sql.import.connection</field>
+        <field name="model">dat.sql.import.connection</field>
         <field name="arch" type="xml">
             <form>
                 <header>
@@ -65,7 +65,7 @@
     <!-- Action -->
     <record id="action_sql_import_connection" model="ir.actions.act_window">
         <field name="name">SQL Server Connections</field>
-        <field name="res_model">sql.import.connection</field>
+        <field name="res_model">dat.sql.import.connection</field>
         <field name="view_mode">list,form</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">

@@ -11,7 +11,7 @@ _logger = logging.getLogger(__name__)
 
 class PasswordMixin(models.AbstractModel):
     """Simple mixin for encrypted password storage"""
-    _name = 'password.mixin'
+    _name = 'dat.password.mixin'
     _description = 'Password Encryption Mixin'
 
     @api.model

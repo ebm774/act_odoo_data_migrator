@@ -7,16 +7,16 @@ _logger = logging.getLogger(__name__)
 
 
 class SqlImportMapping(models.Model):
-    _name = 'sql.import.mapping'
+    _name = 'dat.sql.import.mapping'
     _description = 'SQL Import Table Mapping'
     _rec_name = 'name'
 
     name = fields.Char(string='Mapping Name', required=True)
-    connection_ids  = fields.Many2many('sql.import.connection', string='Connection', required=True)
+    connection_ids  = fields.Many2many('dat.sql.import.connection', string='Connection', required=True)
 
     # Source configuration
     source_schema = fields.Char(string='Source Schema', default='dbo')
-    source_table_id = fields.Many2one('sql.legacy.table', string='Source Table', required=True)
+    source_table_id = fields.Many2one('dat.sql.legacy.table', string='Source Table', required=True)
     source_filter = fields.Text(string='WHERE Clause', help='SQL WHERE clause to filter source data')
 
     # Target configuration

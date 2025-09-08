@@ -4,10 +4,10 @@ import json
 
 
 class SqlImportWizard(models.TransientModel):
-    _name = 'sql.import.wizard'
+    _name = 'dat.sql.import.wizard'
     _description = 'SQL Import Wizard'
 
-    mapping_id = fields.Many2one('sql.import.mapping', string='Mapping', required=True)
+    mapping_id = fields.Many2one('dat.sql.import.mapping', string='Mapping', required=True)
     job_name = fields.Char(string='Job Name', compute='_compute_job_name', store=True)
 
     # Preview
@@ -72,7 +72,7 @@ class SqlImportWizard(models.TransientModel):
 
         return {
             'type': 'ir.actions.act_window',
-            'res_model': 'sql.import.wizard',
+            'res_model': 'dat.sql.import.wizard',
             'res_id': self.id,
             'view_mode': 'form',
             'target': 'new',
@@ -86,7 +86,7 @@ class SqlImportWizard(models.TransientModel):
         self.mapping_id.validate_mapping()
 
         # Create import job
-        job = self.env['sql.import.job'].create({
+        job = self.env['dat.sql.import.job'].create({
             'name': self.job_name,
             'mapping_id': self.mapping_id.id,
         })
@@ -97,7 +97,7 @@ class SqlImportWizard(models.TransientModel):
         # Open the job form
         return {
             'type': 'ir.actions.act_window',
-            'res_model': 'sql.import.job',
+            'res_model': 'dat.sql.import.job',
             'res_id': job.id,
             'view_mode': 'form',
             'target': 'current',
