@@ -30,7 +30,7 @@
     'version': '0.1',
 
     # any module necessary for this one to work correctly
-    'depends': ['base', 'web'],
+    'depends': ['base', 'web', 'base_act'],
 
     # ADD THIS SECTION - External Dependencies
     'external_dependencies': {
