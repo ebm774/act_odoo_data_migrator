@@ -31,20 +31,25 @@ class SqlLegacyTable(models.Model):
         if not connection.exists() or connection.state != 'connected':
             raise UserError(_('Connection must be tested and connected first'))
 
-        # Remove existing tables for this connection
-        existing_tables = self.search([('connection_id', '=', connection_id)])
-        existing_tables.unlink()
 
         # Fetch and create new tables
         try:
             tables = connection._fetch_tables_list()
             table_vals = []
             for table in tables:
-                table_vals.append({
-                    'connection_id': connection_id,
-                    'schema_name': table['schema'],
-                    'table_name': table['table'],
-                })
+
+                existing_table = self.search([
+                    ('connection_id', '=', connection_id),
+                    ('schema_name', '=', table['schema']),
+                    ('table_name', '=', table['table'])
+                ])
+
+                if not existing_table:
+                    table_vals.append({
+                        'connection_id': connection_id,
+                        'schema_name': table['schema'],
+                        'table_name': table['table'],
+                    })
 
             if table_vals:
                 self.create(table_vals)
