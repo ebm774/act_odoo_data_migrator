@@ -206,50 +206,64 @@ class SqlImportJob(models.Model):
             self._log('Starting data verification ...')
             self._verify_imported_data()
 
-
     def _verify_imported_data(self):
-        self.write({'verification_status' : 'running'})
+        """Verify imported data against source using only field mappings"""
+        self.write({'verification_status': 'running'})
 
         mapping = self.mapping_id
         field_mappings = json.loads(mapping.field_mappings or '[]')
+
+        if not field_mappings:
+            self._log('No field mappings defined - skipping verification', 'warning')
+            self.write({
+                'verification_status': 'failed',
+                'verification_details': 'No field mappings configured for verification'
+            })
+            return
 
         mismatches = []
         total_verified = 0
 
         try:
-            source_checksums = self._get_source_checksums(field_mappings)
-            target_checksums = self._get_target_checksums(field_mappings)
+            # Only verify fields that are in field_mappings
+            source_data = self._get_source_mapped_data(field_mappings)
+            target_data = self._get_target_mapped_data(field_mappings)
 
-            self._log(f'Source records count: {len(source_checksums)}')
-            self._log(f'Target records count: {len(target_checksums)}')
+            self._log(f'Source records count: {len(source_data)}')
+            self._log(f'Target records count: {len(target_data)}')
 
-            source_keys = list(source_checksums.keys())[:3]
-            target_keys = list(target_checksums.keys())[:3]
-            self._log(f'First 3 source keys: {source_keys}')
-            self._log(f'First 3 target keys: {target_keys}')
-
-            for key in source_keys:
-                if key in source_checksums and key in target_checksums:
-                    self._log(f'Key {key}: Source={source_checksums[key]}, Target={target_checksums[key]}')
-
-            for source_key, source_checksum in source_checksums.items():
-
+            # Compare each source record with target
+            for source_key, source_values in source_data.items():
                 total_verified += 1
 
-                if source_key not in target_checksums:
-                    mismatches.append(f"Missing record:  {source_key}")
+                if source_key not in target_data:
+                    mismatches.append(f"Missing record in target: {source_key}")
+                    continue
 
-                elif source_checksum != target_checksums[source_key]:
-                    mismatches.append(f"Check mismatch for record : {source_key}")
+                target_values = target_data[source_key]
 
-            for target_key in target_checksums:
-                if target_key not in source_checksums:
-                    mismatches.append(f"Extra record in target:  {target_key}")
+                # Compare each mapped field
+                for i, field_mapping in enumerate(field_mappings):
+                    source_field = field_mapping['source_field']
+                    target_field = field_mapping['target_field']
+
+                    if i < len(source_values) and i < len(target_values):
+                        if source_values[i] != target_values[i]:
+                            mismatches.append(
+                                f"Data mismatch for record {source_key}, field '{source_field}' -> '{target_field}': "
+                                f"Source='{source_values[i]}', Target='{target_values[i]}'"
+                            )
+
+            # Check for extra records in target
+            for target_key in target_data:
+                if target_key not in source_data:
+                    mismatches.append(f"Extra record in target: {target_key}")
 
             self.write({
                 'checksum_mismatches': len(mismatches),
                 'verification_status': 'failed' if mismatches else 'passed',
-                'verification_details': '\n'.join(mismatches) if mismatches else f'All {total_verified} records verified successfully'
+                'verification_details': '\n'.join(
+                    mismatches) if mismatches else f'All {total_verified} records verified successfully'
             })
 
             if mismatches:
@@ -257,127 +271,116 @@ class SqlImportJob(models.Model):
             else:
                 self._log(f'Verification passed: All {total_verified} records match', 'info')
 
-        except Exception as e :
+        except Exception as e:
             self.write({
                 'verification_status': 'failed',
-                'verification_details': f'Verification error : {str(e)}'
+                'verification_details': f'Verification error: {str(e)}'
             })
+            self._log(f'Verification error: {str(e)}', 'error')
 
-            self._log(f'Verification error : {str(e)}', 'error')
-
-    def _get_source_checksums(self, field_mappings):
-
-        checksums = {}
+    def _get_source_mapped_data(self, field_mappings):
+        """Get source data indexed by the first field (usually ID)"""
+        data = {}
         mapping = self.mapping_id
+
+        # Build unique field list to avoid duplicates
+        unique_fields = []
+        seen_fields = set()
+
+        for fm in field_mappings:
+            field_name = fm['source_field']
+            if field_name not in seen_fields:
+                unique_fields.append(f"[{field_name}]")
+                seen_fields.add(field_name)
+
+        if not unique_fields:
+            raise UserError('No fields to verify - field mappings is empty')
+
+        # The first field should be our ID field
+        id_field = field_mappings[0]['source_field']
 
         with mapping.connection_ids.get_connection() as conn:
             cursor = conn.cursor()
+
             schema_name = mapping.source_table_id.schema_name
             table_name = mapping.source_table_id.table_name
 
-            self._log(f'Getting column info for {schema_name}.{table_name}')
-
-            # Get column information including data types
-            try:
-                cursor.execute("""
-                               SELECT COLUMN_NAME,
-                                      DATA_TYPE,
-                                      CHARACTER_MAXIMUM_LENGTH,
-                                      NUMERIC_PRECISION,
-                                      NUMERIC_SCALE
-                               FROM INFORMATION_SCHEMA.COLUMNS
-                               WHERE TABLE_SCHEMA = %s
-                                 AND TABLE_NAME = %s
-                               ORDER BY ORDINAL_POSITION
-                               """, (schema_name, table_name))
-
-                column_info = {row[0]: {
-                    'data_type': row[1].lower(),
-                    'max_length': row[2],
-                    'precision': row[3],
-                    'scale': row[4]
-                } for row in cursor.fetchall()}
-
-                self._log(f'Found {len(column_info)} columns: {list(column_info.keys())}')
-
-            except Exception as e:
-                self._log(f'Column query failed: {str(e)}', 'error')
-
-
-            if not column_info:
-                raise UserError(f'No columns found for table {schema_name}.{table_name}')
-
-            # Build checksum calculation for each field with proper type handling
-            checksum_parts = []
-            binary_field_count = 0
-            text_field_count = 0
-
-            for field_mapping in field_mappings:
-                field = field_mapping['source_field']
-
-                if field in ['Attachment']:
-                    continue
-
-                if field not in column_info:
-                    self._log(f'Warning: Field {field} not found in table columns', 'warning')
-
-                    checksum_parts.append("'MISSING_FIELD'")
-                    continue
-
-                info = column_info[field]
-                data_type = info['data_type']
-
-                checksum_part, binary_count, text_count = self._source_datatype_management(
-                    data_type, field, binary_field_count, text_field_count)
-
-
-                checksum_parts.append(checksum_part)
-                binary_field_count = binary_count
-                text_field_count = text_count
-
-            # Log special field handling
-            if binary_field_count > 0:
-                self._log(f'Found {binary_field_count} binary fields - using length + signature for verification')
-            if text_field_count > 0:
-                self._log(f'Found {text_field_count} large text fields - using length + checksum for verification')
-
-            # Create final checksum query
-            if not checksum_parts:
-                raise UserError('No valid fields found for checksum calculation')
-
-            checksum_concat = " + '|' + ".join(checksum_parts)
-            order_field = field_mappings[0]['source_field']
-
             query = f"""
-            SELECT 
-                ROW_NUMBER() OVER (ORDER BY [{order_field}]) as row_num,
-                {checksum_concat} as concatenated_values
+            SELECT {', '.join(unique_fields)}
             FROM [{schema_name}].[{table_name}]
             {f'WHERE {mapping.source_filter}' if mapping.source_filter else ''}
-            ORDER BY [{order_field}]
+            ORDER BY [{id_field}]
             """
 
-            self._log(f'Executing checksum query for {len(field_mappings)} fields')
+            self._log(f'Source verification query: {query}')
 
             try:
                 cursor.execute(query)
-                row_count = 0
 
                 for row in cursor.fetchall():
-                    row_count += 1
-                    concat_string = str(row[1]) if row[1] is not None else ''
-                    checksum = sum(ord(char) for char in concat_string) % (2 ** 31)
-                    checksums[row[0]] = checksum
+                    record_id = row[0]  # First field (ID)
+                    record_values = []
 
-                self._log(f'Generated checksums for {row_count} records')
+                    # Map row values back to field mappings
+                    field_to_index = {fm['source_field']: i for i, field in enumerate(unique_fields)
+                                      for fm in field_mappings if f"[{fm['source_field']}]" == field}
+
+                    for field_mapping in field_mappings:
+                        source_field = field_mapping['source_field']
+                        field_index = field_to_index.get(source_field, 0)
+                        raw_value = row[field_index]
+
+                        transform = field_mapping.get('transform', 'direct')
+                        normalized_value = self._normalize_value_for_comparison(raw_value, transform)
+                        record_values.append(normalized_value)
+
+                    data[record_id] = record_values
+
+                self._log(f'Retrieved {len(data)} source records for verification')
 
             except Exception as e:
-                self._log(f'Checksum query failed: {str(e)}', 'error')
-                # Log the problematic query for debugging
-                self._log(f'Failed query: {query}', 'error')
-                raise UserError(f'Failed to generate source checksums: {str(e)}')
+                self._log(f'Source data query failed: {str(e)}', 'error')
+                raise UserError(f'Failed to get source data: {str(e)}')
 
-        return checksums
+        return data
+
+    def _normalize_value_for_comparison(self, value, transform):
+        """Normalize values consistently for comparison between source and target"""
+        if value is None or value is False:
+            return 'NULL'
+
+        if transform == 'bool':
+            return '1' if value else '0'
+        elif transform == 'int':
+            try:
+                return str(int(value))
+            except (ValueError, TypeError):
+                return 'NULL'
+        elif transform == 'float':
+            try:
+                float_val = float(value)
+                if float_val.is_integer():
+                    return str(int(float_val))
+                else:
+                    return f"{float_val:.6f}".rstrip('0').rstrip('.')
+            except (ValueError, TypeError):
+                return 'NULL'
+        elif transform in ['str', 'email']:  # Treat both as strings for comparison
+            if value == '':
+                return ''
+            return str(value).strip() if value else 'NULL'
+        elif transform in ['date', 'datetime']:
+            if hasattr(value, 'strftime'):
+                if transform == 'date':
+                    return value.strftime('%Y-%m-%d')
+                else:
+                    return value.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            else:
+                return str(value) if value else 'NULL'
+        else:  # direct
+            if value == '':
+                return ''
+            return str(value).strip() if value else 'NULL'
 
     def _source_datatype_management(self, data_type, field, binary_field_count=0, text_field_count=0):
         # Create local copies to modify
@@ -438,91 +441,44 @@ class SqlImportJob(models.Model):
 
         return checksum_part, local_binary_count, local_text_count
 
-    def _get_target_checksums(self, field_mappings):
-        checksums = {}
+    def _get_target_mapped_data(self, field_mappings):
+        """Get target data for only the mapped fields"""
+        data = {}
         mapping = self.mapping_id
 
         target_model = self.env[mapping.target_model]
-        records = target_model.search([], order='legacy_id')
 
-        self._log(f'Target fields being checksummed: {[fm["target_field"] for fm in field_mappings]}')
-        self._log(f'Target record count: {len(records)}')
+        # Find records that have legacy_id (imported records)
+        domain = []
+        if 'legacy_id' in target_model._fields:
+            domain = [('legacy_id', '!=', False)]
 
-        source_field_order = [fm['source_field'] for fm in field_mappings]
-        self._log(f'Source field order: {source_field_order}')
+        records = target_model.search(domain, order='legacy_id')
 
-        for i, record in enumerate(records, 1):
+        self._log(f'Found {len(records)} target records to verify')
 
-            values = []
+        for record in records:
+            # Use legacy_id as identifier, fallback to id
+            record_id = getattr(record, 'legacy_id', record.id)
+            record_values = []
 
+            # Process each mapped field
             for field_mapping in field_mappings:
-
-                field = field_mapping['target_field']
+                target_field = field_mapping['target_field']
                 transform = field_mapping.get('transform', 'direct')
 
-                if field in ['create_uid', 'write_uid', 'create_date', 'write_date', 'attachment_data', 'display_name']:
+                # Skip system fields that don't need verification
+                if target_field in ['create_uid', 'write_uid', 'create_date', 'write_date', 'display_name']:
+                    record_values.append('NULL')
                     continue
 
-                value = getattr(record, field, None)
+                raw_value = getattr(record, target_field, None)
+                normalized_value = self._normalize_target_value(raw_value, transform)
+                record_values.append(normalized_value)
 
-                if value is None or value is False:
-                    normalized_value = 'NULL'
-                elif transform == 'bool':
-                    normalized_value = '1' if value else '0'
-                elif transform == 'int':
-                    if value is False or value is None:
-                        normalized_value = 'NULL'
-                    else:
-                        try:
-                            normalized_value = str(int(value))
-                        except (ValueError, TypeError):
-                            normalized_value = 'NULL'
-                elif transform =='float':
-                    if value == False or value is None:
-                        normalized_value = 'NULL'
-                    elif value == 0 or value == 0.0:
-                        normalized_value = '0'
-                    else:
-                        try:
-                            float_val = float(value)
-                            if float_val.is_integer():
-                                normalized_value = str(int(float_val))  # 120.0 -> "120"
-                            else:
-                                normalized_value = f"{float_val:.6f}".rstrip('0').rstrip('.')
-                        except (ValueError, TypeError):
-                            normalized_value = 'NULL'
-                elif transform in ['date', 'datetime']:
-                    if value and value != False:
-                        # Format dates consistently with SQL Server format
-                        if hasattr(value, 'strftime'):
-                            if transform == 'date':
-                                normalized_value = value.strftime('%Y-%m-%d')
-                            else:
-                                normalized_value = value.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-                        else:
-                            normalized_value = str(value)
-                    else:
-                        normalized_value = 'NULL'
-                elif transform == 'str':
-                    if value == False :
-                        normalized_value = 'NULL'
-                    elif value == '':
-                        normalized_value = ''
-                    else :
-                        normalized_value = str(value).strip()
-                else:
-                    if value == False:
-                        normalized_value = 'NULL'
-                    else:
-                        normalized_value = str(value).strip()
+            data[record_id] = record_values
 
-                values.append(normalized_value)
-
-            checksum_string = '|'.join(values)
-            checksum = sum(ord(char) for char in checksum_string) % (2**31)
-            checksums[i] = checksum
-
-        return checksums
+        return data
 
     def action_verify_data(self):
         """Manual verification trigger"""
@@ -541,6 +497,77 @@ class SqlImportJob(models.Model):
             'view_mode': 'form',
             'target': 'current',
         }
+
+    def _normalize_source_value(self, value, transform):
+        """Normalize source value based on transform type"""
+        if value is None:
+            return 'NULL'
+
+        if transform == 'bool':
+            return '1' if value else '0'
+        elif transform == 'int':
+            try:
+                return str(int(value))
+            except (ValueError, TypeError):
+                return 'NULL'
+        elif transform == 'float':
+            try:
+                float_val = float(value)
+                if float_val.is_integer():
+                    return str(int(float_val))
+                else:
+                    return f"{float_val:.6f}".rstrip('0').rstrip('.')
+            except (ValueError, TypeError):
+                return 'NULL'
+        elif transform == 'str':
+            return str(value).strip() if value != '' else ''
+        elif transform in ['date', 'datetime']:
+            if hasattr(value, 'strftime'):
+                if transform == 'date':
+                    return value.strftime('%Y-%m-%d')
+                else:
+                    return value.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            else:
+                return str(value)
+        else:  # direct
+            return str(value).strip() if value != '' else ''
+
+    def _normalize_target_value(self, value, transform):
+        """Normalize target value based on transform type"""
+        if value is None or value is False:
+            return 'NULL'
+
+        if transform == 'bool':
+            return '1' if value else '0'
+        elif transform == 'int':
+            try:
+                return str(int(value))
+            except (ValueError, TypeError):
+                return 'NULL'
+        elif transform == 'float':
+            try:
+                float_val = float(value)
+                if float_val.is_integer():
+                    return str(int(float_val))
+                else:
+                    return f"{float_val:.6f}".rstrip('0').rstrip('.')
+            except (ValueError, TypeError):
+                return 'NULL'
+        elif transform == 'str':
+            return str(value).strip() if value != '' else ''
+        elif transform in ['date', 'datetime']:
+            if value and value != False:
+                if hasattr(value, 'strftime'):
+                    if transform == 'date':
+                        return value.strftime('%Y-%m-%d')
+                    else:
+                        return value.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                else:
+                    return str(value)
+            else:
+                return 'NULL'
+        else:  # direct
+            return str(value).strip() if value != '' else ''
 
     def action_show_verification_report(self):
         self.ensure_one()
