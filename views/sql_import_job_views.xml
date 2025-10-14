@@ -63,7 +63,7 @@
                                 decoration-success="verification_status == 'passed'"
                                 decoration-danger="verification_status == 'failed'"
                                 decoration-warning="verification_status == 'running'"/>
-                            <field name="checksum_mismatches" invisible="checksum_mismatches == 0"/>
+                            <field name="checksum_mismatches" invisible="not checksum_mismatches"/>
                         </group>
                     </group>
                     <group string="Execution Details" invisible="state == 'draft'">
@@ -76,10 +76,10 @@
                             <field name="log_entries" widget="text" readonly="1"
                                 style="font-family: monospace; background-color: #f8f9fa;"/>
                         </page>
-                        <page string="Error Details" invisible="error_message == False">
+                        <page string="Error Details" invisible="not error_message">
                             <field name="error_message" readonly="1"/>
                         </page>
-                        <page string="Verification Details" invisible="verification_details == False">
+                        <page string="Verification Details" invisible="not verification_details">
                             <field name="verification_details" widget="text" readonly="1"
                                 style="font-family: monospace; background-color: #f8f9fa;"/>
                         </page>
